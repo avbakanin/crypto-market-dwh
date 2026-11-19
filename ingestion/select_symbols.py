@@ -7,7 +7,7 @@ Run from repo root: python -m ingestion.select_symbols
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -77,7 +77,7 @@ def get_quote_volumes(client: SymbolsSource) -> dict[str, float]:
 def get_first_open_time(client: SymbolsSource, symbol: str) -> datetime:
     """Open time of the very first daily candle = listing date (approx.)."""
     klines = client.klines(symbol, "1d", start_time=0, limit=1)
-    return datetime.fromtimestamp(klines[0][0] / 1000, tz=timezone.utc)
+    return datetime.fromtimestamp(klines[0][0] / 1000, tz=UTC)
 
 
 def get_daily_stats(
@@ -166,7 +166,7 @@ def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
 
 def main() -> None:
     with BinanceClient() as client:
-        rows = select_symbols(client, now=datetime.now(timezone.utc))
+        rows = select_symbols(client, now=datetime.now(UTC))
     write_csv(rows, OUTPUT_PATH)
     print(f"\nSaved {len(rows)} symbols to {OUTPUT_PATH}:")
     for r in rows:

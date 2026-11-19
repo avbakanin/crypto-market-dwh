@@ -6,7 +6,7 @@ so the only rule that can drop it is the one under test.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -21,10 +21,10 @@ def to_ms(dt: datetime) -> int:
     return int(dt.timestamp() * 1000)
 
 
-NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)  # midnight: today's daily candle opens at NOW
+NOW = datetime(2026, 1, 1, tzinfo=UTC)  # midnight: today's daily candle opens at NOW
 NOW_MS = to_ms(NOW)
 CUTOFF_MS = NOW_MS - sel.MIN_HISTORY_DAYS * DAY_MS  # 2025-01-01 00:00 UTC
-LISTED_LONG_AGO_MS = to_ms(datetime(2020, 1, 1, tzinfo=timezone.utc))
+LISTED_LONG_AGO_MS = to_ms(datetime(2020, 1, 1, tzinfo=UTC))
 LIQUID = 2.0 * sel.MIN_AVG_QUOTE_VOLUME_USDT  # comfortably above both volume thresholds
 
 

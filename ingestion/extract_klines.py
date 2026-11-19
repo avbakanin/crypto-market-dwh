@@ -8,7 +8,7 @@ from __future__ import annotations
 import csv
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -81,7 +81,7 @@ def check_klines(klines: list[Kline]) -> dict[str, int]:
 
 def ms_to_utc(ms: int) -> datetime:
     """Convert Unix milliseconds to timezone-aware UTC datetime."""
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+    return datetime.fromtimestamp(ms / 1000, tz=UTC)
 
 
 def main() -> None:
