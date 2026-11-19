@@ -10,7 +10,7 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from ingestion.clients.binance import BinanceClient
 
@@ -28,13 +28,26 @@ HISTORY_DAYS = 365
 PAUSE_S = 0.2  # politeness pause between pages
 
 
+class KlinesSource(Protocol):
+    """Anything that serves klines like BinanceClient.klines: the real client or a test fake."""
+
+    def klines(
+        self,
+        symbol: str,
+        interval: str,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int = 1000,
+    ) -> list[Kline]: ...
+
+
 def load_symbols(path: Path = SYMBOLS_PATH) -> list[str]:
     """Read whitelisted symbols from config/symbols.csv."""
     with path.open(encoding="utf-8", newline="") as f:
         return [row["symbol"] for row in csv.DictReader(f)]
 
 
-def fetch_history(client: BinanceClient, symbol: str, start_ms: int, now_ms: int) -> list[Kline]:
+def fetch_history(client: KlinesSource, symbol: str, start_ms: int, now_ms: int) -> list[Kline]:
     """Page through klines from start_ms until now_ms."""
     all_klines: list[Kline] = []
     while start_ms < now_ms:
