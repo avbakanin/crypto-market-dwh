@@ -1,73 +1,69 @@
-"""Extract hourly klines from Binance public API and save them to JSON."""
+"""Extract hourly klines for whitelisted symbols from Binance and save them to JSON.
 
+Run from repo root: python -m ingestion.extract_klines
+"""
+
+from __future__ import annotations
+
+import csv
 import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-import requests
+from ingestion.clients.binance import BinanceClient
 
-BASE_URL = "https://api.binance.com"
-KLINES_ENDPOINT = "/api/v3/klines"
-OUTPUT_DIR = Path("data/raw")
-HOUR_MS = 60 * 60 * 1000
+Kline = list[Any]
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SYMBOLS_PATH = PROJECT_ROOT / "config" / "symbols.csv"
+OUTPUT_DIR = PROJECT_ROOT / "data" / "raw"
+
+INTERVAL = "1h"
+INTERVAL_MS = 60 * 60 * 1000  # must match INTERVAL
+DAY_MS = 24 * 60 * 60 * 1000
 PAGE_LIMIT = 1000
+HISTORY_DAYS = 365
+PAUSE_S = 0.2  # politeness pause between pages
 
 
-def fetch_klines(symbol: str, start_ms: int, interval: str = "1h") -> list[list]:
-    """Return one page of klines starting from start_ms (inclusive)."""
-    params = {
-        "symbol": symbol,
-        "interval": interval,
-        "startTime": start_ms,
-        "limit": PAGE_LIMIT,
-    }
-    response = requests.get(BASE_URL + KLINES_ENDPOINT, params=params, timeout=10)
-    response.raise_for_status()
-    return response.json()
+def load_symbols(path: Path = SYMBOLS_PATH) -> list[str]:
+    """Read whitelisted symbols from config/symbols.csv."""
+    with path.open(encoding="utf-8", newline="") as f:
+        return [row["symbol"] for row in csv.DictReader(f)]
 
 
-def fetch_history(symbol: str, days: int) -> list[list]:
-    """Page through the API from (now - days) until now."""
-    now_ms = int(time.time() * 1000)
-    start_ms = now_ms - days * 24 * HOUR_MS
-    all_klines: list[list] = []
-
+def fetch_history(client: BinanceClient, symbol: str, start_ms: int, now_ms: int) -> list[Kline]:
+    """Page through klines from start_ms until now_ms."""
+    all_klines: list[Kline] = []
     while start_ms < now_ms:
-        batch = fetch_klines(symbol, start_ms)
+        batch = client.klines(symbol, INTERVAL, start_time=start_ms, limit=PAGE_LIMIT)
         if not batch:
             break
         all_klines.extend(batch)
-        print(f"  {symbol}: +{len(batch)} candles, up to {ms_to_utc(batch[-1][0])}")
-
-        start_ms = batch[-1][0] + HOUR_MS  # next candle after the last one received
+        start_ms = batch[-1][0] + INTERVAL_MS  # next candle after the last one received
         if len(batch) < PAGE_LIMIT:
             break  # reached the most recent candle
-        time.sleep(0.2)  # be gentle with API rate limits
-
+        time.sleep(PAUSE_S)
     return all_klines
 
 
-def drop_unclosed(klines: list[list]) -> list[list]:
-    """Remove the current candle that is not closed yet."""
-    now_ms = int(time.time() * 1000)
+def drop_unclosed(klines: list[Kline], now_ms: int) -> list[Kline]:
+    """Keep only candles closed before the run's as-of moment (DQ note #2)."""
     return [k for k in klines if k[6] < now_ms]
 
 
-def check_klines(klines: list[list]) -> None:
-    """Basic data quality checks: row count, duplicates, gaps in the hourly grid."""
+def check_klines(klines: list[Kline]) -> dict[str, int]:
+    """DQ checks: row count, duplicate open_time, gaps in the interval grid."""
     open_times = [k[0] for k in klines]
-    duplicates = len(open_times) - len(set(open_times))
-    gaps = [
-        (ms_to_utc(prev), ms_to_utc(curr))
-        for prev, curr in zip(open_times, open_times[1:])
-        if curr - prev != HOUR_MS
-    ]
-    print(f"Rows: {len(klines)}")
-    print(f"Duplicate open_time: {duplicates}")
-    print(f"Gaps in hourly grid: {len(gaps)}")
-    for prev, curr in gaps[:10]:
-        print(f"  gap: {prev} -> {curr}")
+    unique = sorted(set(open_times))
+    gaps = sum(1 for prev, curr in zip(unique, unique[1:]) if curr - prev != INTERVAL_MS)
+    return {
+        "rows": len(klines),
+        "duplicates": len(open_times) - len(unique),
+        "gaps": gaps,
+    }
 
 
 def ms_to_utc(ms: int) -> datetime:
@@ -76,14 +72,26 @@ def ms_to_utc(ms: int) -> datetime:
 
 
 def main() -> None:
-    symbol = "BTCUSDT"
-    klines = drop_unclosed(fetch_history(symbol, days=365))
-    check_klines(klines)
-
+    symbols = load_symbols()
+    now_ms = int(time.time() * 1000)  # single as-of moment for the whole run
+    start_ms = now_ms - HISTORY_DAYS * DAY_MS
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_file = OUTPUT_DIR / f"{symbol}.json"
-    out_file.write_text(json.dumps(klines), encoding="utf-8")
-    print(f"Saved to {out_file}")
+    print(f"Extracting {len(symbols)} symbols, {INTERVAL}, as of {ms_to_utc(now_ms):%Y-%m-%d %H:%M} UTC")
+
+    results: dict[str, dict[str, int]] = {}
+    with BinanceClient() as client:
+        for i, symbol in enumerate(symbols, start=1):
+            klines = drop_unclosed(fetch_history(client, symbol, start_ms, now_ms), now_ms)
+            stats = check_klines(klines)
+            results[symbol] = stats
+            (OUTPUT_DIR / f"{symbol}.json").write_text(json.dumps(klines), encoding="utf-8")
+            print(
+                f"[{i:>2}/{len(symbols)}] {symbol:<10} rows={stats['rows']:>5} "
+                f"dup={stats['duplicates']} gaps={stats['gaps']}"
+            )
+
+    with_issues = [s for s, st in results.items() if st["duplicates"] or st["gaps"]]
+    print(f"\nDone: {len(results)} symbols, with DQ issues: {len(with_issues)} {with_issues or ''}")
 
 
 if __name__ == "__main__":
