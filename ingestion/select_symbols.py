@@ -9,7 +9,7 @@ from __future__ import annotations
 import csv
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from ingestion.clients.binance import BinanceClient
 
@@ -36,7 +36,24 @@ EXCLUDED_BASE_ASSETS = {
 }
 
 
-def get_trading_symbols(client: BinanceClient) -> dict[str, dict[str, Any]]:
+class SymbolsSource(Protocol):
+    """What select_symbols needs from an exchange: the real BinanceClient or a test fake."""
+
+    def exchange_info(self) -> dict[str, Any]: ...
+
+    def ticker_24h(self) -> list[dict[str, Any]]: ...
+
+    def klines(
+        self,
+        symbol: str,
+        interval: str,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int = 1000,
+    ) -> list[list[Any]]: ...
+
+
+def get_trading_symbols(client: SymbolsSource) -> dict[str, dict[str, Any]]:
     """Spot USDT pairs that are currently trading, excluding stables/wrapped."""
     data = client.exchange_info()
     return {
@@ -49,29 +66,29 @@ def get_trading_symbols(client: BinanceClient) -> dict[str, dict[str, Any]]:
     }
 
 
-def get_quote_volumes(client: BinanceClient) -> dict[str, float]:
+def get_quote_volumes(client: SymbolsSource) -> dict[str, float]:
     """24h quote volume per symbol. float is OK here: used only for ranking, never stored as a fact."""
     return {t["symbol"]: float(t["quoteVolume"]) for t in client.ticker_24h()}
 
 
-def get_first_open_time(client: BinanceClient, symbol: str) -> datetime:
+def get_first_open_time(client: SymbolsSource, symbol: str) -> datetime:
     """Open time of the very first daily candle = listing date (approx.)."""
     klines = client.klines(symbol, "1d", start_time=0, limit=1)
     return datetime.fromtimestamp(klines[0][0] / 1000, tz=timezone.utc)
 
 
 def get_daily_stats(
-    client: BinanceClient, symbol: str, days: int = VOLUME_WINDOW_DAYS
+    client: SymbolsSource, symbol: str, days: int = VOLUME_WINDOW_DAYS
 ) -> tuple[float, float, float]:
     """Return (avg daily quote volume, min close, max close) over the last `days` closed daily candles."""
-    klines = client.klines(symbol, "1d", limit=days + 1)
-    closed = klines[:-1]  # today's daily candle is not closed yet (DQ note #2)
+    klines = client.klines(symbol, "1d", limit=days + 1)  # no start_time => most recent candles
+    closed = klines[:-1]  # the most recent one is today's, still open (DQ note #14)
     avg_volume = sum(float(k[7]) for k in closed) / len(closed)
     closes = [float(k[4]) for k in closed]
     return avg_volume, min(closes), max(closes)
 
 
-def select_symbols(client: BinanceClient) -> list[dict[str, Any]]:
+def select_symbols(client: SymbolsSource) -> list[dict[str, Any]]:
     """Apply whitelist rules: history >= 1y, not USD-pegged, 30d avg volume >= threshold.
 
     Trade-off: the 24h prefilter may drop a symbol with a quiet day but high 30d average;
