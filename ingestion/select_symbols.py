@@ -1,6 +1,7 @@
 """Select a whitelist of liquid Binance spot USDT pairs for the DWH.
 
 Output: config/symbols.csv — future source for dim_symbol (dbt seed).
+Run from repo root: python -m ingestion.select_symbols
 """
 
 from __future__ import annotations
@@ -10,10 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import requests
-
-BASE_URL = "https://api.binance.com"
-TIMEOUT_S = 10
+from ingestion.clients.binance import BinanceClient
 
 QUOTE_ASSET = "USDT"
 TOP_N = 25
@@ -38,17 +36,9 @@ EXCLUDED_BASE_ASSETS = {
 }
 
 
-def get_json(path: str, params: dict[str, Any] | None = None) -> Any:
-    """GET a Binance endpoint; on error show the response body (code/msg)."""
-    response = requests.get(f"{BASE_URL}{path}", params=params, timeout=TIMEOUT_S)
-    if not response.ok:
-        raise RuntimeError(f"HTTP {response.status_code} on {path}: {response.text}")
-    return response.json()
-
-
-def get_trading_symbols() -> dict[str, dict[str, Any]]:
+def get_trading_symbols(client: BinanceClient) -> dict[str, dict[str, Any]]:
     """Spot USDT pairs that are currently trading, excluding stables/wrapped."""
-    data = get_json("/api/v3/exchangeInfo")
+    data = client.exchange_info()
     return {
         s["symbol"]: s
         for s in data["symbols"]
@@ -59,41 +49,36 @@ def get_trading_symbols() -> dict[str, dict[str, Any]]:
     }
 
 
-def get_quote_volumes() -> dict[str, float]:
+def get_quote_volumes(client: BinanceClient) -> dict[str, float]:
     """24h quote volume per symbol. float is OK here: used only for ranking, never stored as a fact."""
-    tickers = get_json("/api/v3/ticker/24hr")
-    return {t["symbol"]: float(t["quoteVolume"]) for t in tickers}
+    return {t["symbol"]: float(t["quoteVolume"]) for t in client.ticker_24h()}
 
 
-def get_first_open_time(symbol: str) -> datetime:
+def get_first_open_time(client: BinanceClient, symbol: str) -> datetime:
     """Open time of the very first daily candle = listing date (approx.)."""
-    klines = get_json(
-        "/api/v3/klines",
-        {"symbol": symbol, "interval": "1d", "startTime": 0, "limit": 1},
-    )
+    klines = client.klines(symbol, "1d", start_time=0, limit=1)
     return datetime.fromtimestamp(klines[0][0] / 1000, tz=timezone.utc)
 
 
-def get_daily_stats(symbol: str, days: int = VOLUME_WINDOW_DAYS) -> tuple[float, float, float]:
+def get_daily_stats(
+    client: BinanceClient, symbol: str, days: int = VOLUME_WINDOW_DAYS
+) -> tuple[float, float, float]:
     """Return (avg daily quote volume, min close, max close) over the last `days` closed daily candles."""
-    klines = get_json(
-        "/api/v3/klines",
-        {"symbol": symbol, "interval": "1d", "limit": days + 1},
-    )
+    klines = client.klines(symbol, "1d", limit=days + 1)
     closed = klines[:-1]  # today's daily candle is not closed yet (DQ note #2)
     avg_volume = sum(float(k[7]) for k in closed) / len(closed)
     closes = [float(k[4]) for k in closed]
     return avg_volume, min(closes), max(closes)
 
 
-def select_symbols() -> list[dict[str, Any]]:
+def select_symbols(client: BinanceClient) -> list[dict[str, Any]]:
     """Apply whitelist rules: history >= 1y, not USD-pegged, 30d avg volume >= threshold.
 
     Trade-off: the 24h prefilter may drop a symbol with a quiet day but high 30d average;
     accepted to keep API calls low.
     """
-    symbols = get_trading_symbols()
-    volumes_24h = get_quote_volumes()
+    symbols = get_trading_symbols(client)
+    volumes_24h = get_quote_volumes(client)
 
     candidates = [s for s in symbols if volumes_24h.get(s, 0.0) >= MIN_24H_VOLUME_PREFILTER_USDT]
     print(
@@ -106,12 +91,12 @@ def select_symbols() -> list[dict[str, Any]]:
     passed: list[dict[str, Any]] = []
 
     for symbol in candidates:
-        first_open = get_first_open_time(symbol)
+        first_open = get_first_open_time(client, symbol)
         if first_open > cutoff:
             print(f"  skip {symbol}: listed {first_open:%Y-%m-%d}, history < {MIN_HISTORY_DAYS} days")
             continue
 
-        avg_volume, min_close, max_close = get_daily_stats(symbol)
+        avg_volume, min_close, max_close = get_daily_stats(client, symbol)
         if PEG_LOW <= min_close and max_close <= PEG_HIGH:
             print(f"  skip {symbol}: USD-pegged, {VOLUME_WINDOW_DAYS}d close range {min_close}-{max_close}")
             continue
@@ -148,7 +133,8 @@ def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
 
 
 def main() -> None:
-    rows = select_symbols()
+    with BinanceClient() as client:
+        rows = select_symbols(client)
     write_csv(rows, OUTPUT_PATH)
     print(f"\nSaved {len(rows)} symbols to {OUTPUT_PATH}:")
     for r in rows:
