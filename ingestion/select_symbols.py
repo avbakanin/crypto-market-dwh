@@ -88,8 +88,10 @@ def get_daily_stats(
     return avg_volume, min(closes), max(closes)
 
 
-def select_symbols(client: SymbolsSource) -> list[dict[str, Any]]:
+def select_symbols(client: SymbolsSource, now: datetime) -> list[dict[str, Any]]:
     """Apply whitelist rules: history >= 1y, not USD-pegged, 30d avg volume >= threshold.
+
+    `now` is the run's as-of moment: the history cutoff and selected_at_utc derive from it.
 
     Trade-off: the 24h prefilter may drop a symbol with a quiet day but high 30d average;
     accepted to keep API calls low.
@@ -103,7 +105,6 @@ def select_symbols(client: SymbolsSource) -> list[dict[str, Any]]:
         f"passed 24h prefilter (${MIN_24H_VOLUME_PREFILTER_USDT:,}): {len(candidates)}"
     )
 
-    now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=MIN_HISTORY_DAYS)
     passed: list[dict[str, Any]] = []
 
@@ -151,7 +152,7 @@ def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
 
 def main() -> None:
     with BinanceClient() as client:
-        rows = select_symbols(client)
+        rows = select_symbols(client, now=datetime.now(timezone.utc))
     write_csv(rows, OUTPUT_PATH)
     print(f"\nSaved {len(rows)} symbols to {OUTPUT_PATH}:")
     for r in rows:
