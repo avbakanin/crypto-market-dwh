@@ -9,6 +9,7 @@ import csv
 import json
 import time
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -71,7 +72,7 @@ def check_klines(klines: list[Kline]) -> dict[str, int]:
     """DQ checks: row count, duplicate open_time, gaps in the interval grid."""
     open_times = [k[0] for k in klines]
     unique = sorted(set(open_times))
-    gaps = sum(1 for prev, curr in zip(unique, unique[1:]) if curr - prev != INTERVAL_MS)
+    gaps = sum(1 for prev, curr in pairwise(unique) if curr - prev != INTERVAL_MS)
     return {
         "rows": len(klines),
         "duplicates": len(open_times) - len(unique),
