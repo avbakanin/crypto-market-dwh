@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from ingestion.extract_klines import INTERVAL_MS, Kline
+from typing import Any
+
+from ingestion.extract_klines import DAY_MS, INTERVAL_MS, Kline
 
 START_MS = 1_735_689_600_000  # 2025-01-01 00:00:00 UTC, aligned to the hour
 
@@ -29,3 +31,35 @@ def make_kline(open_ms: int) -> Kline:
 def make_klines(count: int, start_ms: int = START_MS) -> list[Kline]:
     """Build `count` consecutive hourly klines with no duplicates and no gaps."""
     return [make_kline(start_ms + i * INTERVAL_MS) for i in range(count)]
+
+
+def make_symbol_info(
+    base: str, quote: str = "USDT", status: str = "TRADING", spot: bool = True
+) -> dict[str, Any]:
+    """Build one entry of exchangeInfo["symbols"] with the fields select_symbols reads."""
+    return {
+        "symbol": base + quote,
+        "status": status,
+        "baseAsset": base,
+        "quoteAsset": quote,
+        "isSpotTradingAllowed": spot,
+    }
+
+
+def make_daily_klines(
+    first_open_ms: int,
+    last_open_ms: int,
+    close: str = "100.00000000",
+    quote_volume: str = "20000000.00000000",
+) -> list[Kline]:
+    """Build consecutive daily klines from first_open_ms to last_open_ms inclusive.
+
+    Candles are flat (open = high = low = close): select_symbols reads only close and quote volume.
+    """
+    return [
+        [
+            open_ms, close, close, close, close, "1.00000000",
+            open_ms + DAY_MS - 1, quote_volume, 42, "0.50000000", "0", "0",
+        ]
+        for open_ms in range(first_open_ms, last_open_ms + 1, DAY_MS)
+    ]
