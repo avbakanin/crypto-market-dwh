@@ -21,9 +21,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SYMBOLS_PATH = PROJECT_ROOT / "config" / "symbols.csv"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "raw"
 
+HOUR_MS = 60 * 60 * 1000
+DAY_MS = 24 * HOUR_MS
+# Fixed-length Binance intervals only: "1M" (calendar month) has no constant length.
+INTERVAL_MS_BY_NAME = {"1h": HOUR_MS, "1d": DAY_MS}
+
 INTERVAL = "1h"
-INTERVAL_MS = 60 * 60 * 1000  # must match INTERVAL
-DAY_MS = 24 * 60 * 60 * 1000
+INTERVAL_MS = INTERVAL_MS_BY_NAME[INTERVAL]  # unsupported INTERVAL fails at import, not mid-run
 PAGE_LIMIT = 1000
 HISTORY_DAYS = 365
 PAUSE_S = 0.2  # politeness pause between pages
