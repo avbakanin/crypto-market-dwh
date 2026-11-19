@@ -6,7 +6,7 @@ so the only rule that can drop it is the one under test.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -223,3 +223,22 @@ def test_tokenized_stock_with_long_history_is_dropped() -> None:
     add_market(fake, make_symbol_info("NVDAB"), klines=daily(close="180.00000000"))
 
     assert "NVDABUSDT" not in selected(fake)
+
+
+def test_naive_now_is_rejected_before_any_kline_request() -> None:
+    fake = FakeBinance()
+    add_market(fake, make_symbol_info("BTC"))
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        sel.select_symbols(fake, now=NOW.replace(tzinfo=None))
+    assert fake.kline_calls == []
+
+
+def test_non_utc_now_is_normalized_to_utc() -> None:
+    fake = FakeBinance()
+    add_market(fake, make_symbol_info("BTC"))
+    same_instant_utc_plus_3 = NOW.astimezone(timezone(timedelta(hours=3)))
+
+    [row] = sel.select_symbols(fake, now=same_instant_utc_plus_3)
+
+    assert row["selected_at_utc"] == "2026-01-01T00:00:00+00:00"

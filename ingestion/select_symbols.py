@@ -111,10 +111,15 @@ def select_symbols(client: SymbolsSource, now: datetime) -> list[dict[str, Any]]
     """Apply whitelist rules: history >= 1y, not USD-pegged, 30d avg volume >= threshold.
 
     `now` is the run's as-of moment: the history cutoff and selected_at_utc derive from it.
+    It must be timezone-aware (DQ note #4); any zone is accepted and normalized to UTC.
 
     Trade-off: the 24h prefilter may drop a symbol with a quiet day but high 30d average;
     accepted to keep API calls low.
     """
+    if now.utcoffset() is None:
+        raise ValueError(f"now must be timezone-aware, got naive {now!r}")
+    now = now.astimezone(UTC)  # selected_at_utc must be labelled UTC whatever zone came in
+
     symbols = get_trading_symbols(client)
     volumes_24h = get_quote_volumes(client)
 
