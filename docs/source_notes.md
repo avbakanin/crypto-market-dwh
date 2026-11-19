@@ -40,3 +40,8 @@ Script: `ingestion/select_symbols.py` → `config/symbols.csv` (future source fo
 9. **Non-crypto instruments on the spot market.** Stablecoins (new ones appear constantly, e.g. RWUSD in Oct 2026), gold-backed tokens (PAXG, XAUT), tokenized stocks/ETFs (NVDAB, QQQB, MSTRB, …). → Explicit exclusion list + data rule: 30d close range within [0.98, 1.02] ⇒ USD-pegged, excluded. Open issue: tokenized stocks are currently excluded only by the history rule.
 10. **24h volume is a noisy liquidity metric.** MMTUSDT: 52.6M 24h vs 2.3M 30d average (×22); LUNCUSDT ×9; SKYUSDT ×8. A single snapshot gave 3 false positives out of 24. → Rule: 30-day average daily quote volume ≥ 10M USDT.
 11. **Whitelist is a snapshot.** Volumes change daily, so re-running the script changes the list. → `config/symbols.csv` is committed to git and regenerated only deliberately; `selected_at_utc` records when.
+
+## API behaviour observations
+
+12. **Error semantics.** Errors return a JSON body `{"code": ..., "msg": ...}`, e.g. `HTTP 400 {"code":-1121,"msg":"Invalid symbol."}`. 4xx = our mistake, never retried. 429 = rate limit, may include `Retry-After` (seconds). 418 = IP ban after ignoring 429s, never retried (retrying extends the ban). 5xx = transient, retried with exponential backoff. → Implemented in `ingestion/clients/binance.py`.
+13. **Expected row count is 8,759, not 8,760.** `startTime` is not aligned to the hour, and Binance returns candles with `open_time >= startTime`, so the first candle is the next full hour; the current hour is dropped as unclosed. Verified on all 23 symbols: 8,759 rows, 0 duplicates, 0 gaps (as of 2026-11-19 18:31 UTC). → Row-count checks must expect 8,759 for a 365-day window computed from a single as-of timestamp.
