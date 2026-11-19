@@ -30,3 +30,13 @@
 4. **Timestamps are Unix epoch milliseconds in UTC.** Always pass `tz=timezone.utc` when converting in Python.
 5. **Volume estimate:** one year of hourly candles ≈ 8,760 rows, i.e. at least 9 requests of 1,000 rows per symbol.
 6. **A typo in a symbol may silently return another instrument.** `BTCUSD` (instead of `BTCUSDT`) returns valid data with a similar price (+0.2%) but ~16,000x lower volume. Mitigation: fixed symbol whitelist (`dim_symbol` + dbt `relationships` test) and a minimum liquidity threshold.
+
+## Symbol selection (whitelist) observations
+
+Script: `ingestion/select_symbols.py` → `config/symbols.csv` (future source for `dim_symbol`).
+
+7. **Incomplete history for new listings.** A symbol listed 3 months ago has ~2,200 hourly candles instead of ~8,760 per year; in cross-symbol comparisons this looks like gaps. → Rule: `first_candle_date` at least 365 days ago.
+8. **Ticker ≠ asset.** Renames split history across symbols: LUNA → LUNC after the Terra collapse (May 2022), so `LUNCUSDT` starts on 2022-09-09. `first_candle_date` is the ticker's listing date, not the asset's. → Never merge symbols by base asset name without a mapping table.
+9. **Non-crypto instruments on the spot market.** Stablecoins (new ones appear constantly, e.g. RWUSD in Oct 2026), gold-backed tokens (PAXG, XAUT), tokenized stocks/ETFs (NVDAB, QQQB, MSTRB, …). → Explicit exclusion list + data rule: 30d close range within [0.98, 1.02] ⇒ USD-pegged, excluded. Open issue: tokenized stocks are currently excluded only by the history rule.
+10. **24h volume is a noisy liquidity metric.** MMTUSDT: 52.6M 24h vs 2.3M 30d average (×22); LUNCUSDT ×9; SKYUSDT ×8. A single snapshot gave 3 false positives out of 24. → Rule: 30-day average daily quote volume ≥ 10M USDT.
+11. **Whitelist is a snapshot.** Volumes change daily, so re-running the script changes the list. → `config/symbols.csv` is committed to git and regenerated only deliberately; `selected_at_utc` records when.
