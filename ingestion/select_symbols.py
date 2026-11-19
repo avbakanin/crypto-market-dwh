@@ -67,7 +67,10 @@ def get_trading_symbols(client: SymbolsSource) -> dict[str, dict[str, Any]]:
 
 
 def get_quote_volumes(client: SymbolsSource) -> dict[str, float]:
-    """24h quote volume per symbol. float is OK here: used only for ranking, never stored as a fact."""
+    """24h quote volume per symbol.
+
+    float is OK here: used only for ranking, never stored as a fact.
+    """
     return {t["symbol"]: float(t["quoteVolume"]) for t in client.ticker_24h()}
 
 
@@ -80,7 +83,7 @@ def get_first_open_time(client: SymbolsSource, symbol: str) -> datetime:
 def get_daily_stats(
     client: SymbolsSource, symbol: str, days: int = VOLUME_WINDOW_DAYS
 ) -> tuple[float, float, float]:
-    """Return (avg daily quote volume, min close, max close) over the last `days` closed daily candles."""
+    """Return (avg daily quote volume, min close, max close) over the last `days` closed days."""
     klines = client.klines(symbol, "1d", limit=days + 1)  # no start_time => most recent candles
     closed = klines[:-1]  # the most recent one is today's, still open (DQ note #14)
     avg_volume = sum(float(k[7]) for k in closed) / len(closed)
@@ -111,15 +114,24 @@ def select_symbols(client: SymbolsSource, now: datetime) -> list[dict[str, Any]]
     for symbol in candidates:
         first_open = get_first_open_time(client, symbol)
         if first_open > cutoff:
-            print(f"  skip {symbol}: listed {first_open:%Y-%m-%d}, history < {MIN_HISTORY_DAYS} days")
+            print(
+                f"  skip {symbol}: listed {first_open:%Y-%m-%d}, "
+                f"history < {MIN_HISTORY_DAYS} days"
+            )
             continue
 
         avg_volume, min_close, max_close = get_daily_stats(client, symbol)
         if PEG_LOW <= min_close and max_close <= PEG_HIGH:
-            print(f"  skip {symbol}: USD-pegged, {VOLUME_WINDOW_DAYS}d close range {min_close}-{max_close}")
+            print(
+                f"  skip {symbol}: USD-pegged, "
+                f"{VOLUME_WINDOW_DAYS}d close range {min_close}-{max_close}"
+            )
             continue
         if avg_volume < MIN_AVG_QUOTE_VOLUME_USDT:
-            print(f"  skip {symbol}: {VOLUME_WINDOW_DAYS}d avg volume {avg_volume:,.0f} < {MIN_AVG_QUOTE_VOLUME_USDT:,}")
+            print(
+                f"  skip {symbol}: {VOLUME_WINDOW_DAYS}d avg volume "
+                f"{avg_volume:,.0f} < {MIN_AVG_QUOTE_VOLUME_USDT:,}"
+            )
             continue
 
         passed.append(
@@ -138,7 +150,9 @@ def select_symbols(client: SymbolsSource, now: datetime) -> list[dict[str, Any]]
     selected = passed[:TOP_N]
 
     if len(selected) < MIN_SELECTED:
-        raise RuntimeError(f"Only {len(selected)} symbols passed filters, expected >= {MIN_SELECTED}")
+        raise RuntimeError(
+            f"Only {len(selected)} symbols passed filters, expected >= {MIN_SELECTED}"
+        )
     return selected
 
 
@@ -156,7 +170,10 @@ def main() -> None:
     write_csv(rows, OUTPUT_PATH)
     print(f"\nSaved {len(rows)} symbols to {OUTPUT_PATH}:")
     for r in rows:
-        print(f"  {r['symbol']:<12} {r['avg_quote_volume_30d_usdt']:>16,}  since {r['first_candle_date']}")
+        print(
+            f"  {r['symbol']:<12} {r['avg_quote_volume_30d_usdt']:>16,}  "
+            f"since {r['first_candle_date']}"
+        )
 
 
 if __name__ == "__main__":

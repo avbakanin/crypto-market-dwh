@@ -67,7 +67,10 @@ class BinanceClient:
                 if is_last:
                     raise
                 wait = self._backoff(attempt)
-                print(f"  {type(exc).__name__} on {path}, retry {attempt}/{self.max_retries} in {wait:.0f}s")
+                print(
+                    f"  {type(exc).__name__} on {path}, "
+                    f"retry {attempt}/{self.max_retries} in {wait:.0f}s"
+                )
                 time.sleep(wait)
                 continue
 
@@ -76,7 +79,10 @@ class BinanceClient:
 
             if response.status_code in RETRY_STATUS_CODES and not is_last:
                 wait = self._retry_after(response) or self._backoff(attempt)
-                print(f"  HTTP {response.status_code} on {path}, retry {attempt}/{self.max_retries} in {wait:.0f}s")
+                print(
+                    f"  HTTP {response.status_code} on {path}, "
+                    f"retry {attempt}/{self.max_retries} in {wait:.0f}s"
+                )
                 time.sleep(wait)
                 continue
 

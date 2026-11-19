@@ -89,7 +89,10 @@ def main() -> None:
     now_ms = int(time.time() * 1000)  # single as-of moment for the whole run
     start_ms = now_ms - HISTORY_DAYS * DAY_MS
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Extracting {len(symbols)} symbols, {INTERVAL}, as of {ms_to_utc(now_ms):%Y-%m-%d %H:%M} UTC")
+    print(
+        f"Extracting {len(symbols)} symbols, {INTERVAL}, "
+        f"as of {ms_to_utc(now_ms):%Y-%m-%d %H:%M} UTC"
+    )
 
     results: dict[str, dict[str, int]] = {}
     with BinanceClient() as client:
