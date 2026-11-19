@@ -16,23 +16,39 @@ from ingestion.clients.binance import BinanceClient
 QUOTE_ASSET = "USDT"
 TOP_N = 25
 MIN_SELECTED = 20
-MIN_24H_VOLUME_PREFILTER_USDT = 5_000_000   # cheap prefilter to limit API calls
-MIN_AVG_QUOTE_VOLUME_USDT = 10_000_000      # liquidity rule: 30-day average daily turnover
+MIN_24H_VOLUME_PREFILTER_USDT = 5_000_000  # cheap prefilter to limit API calls
+MIN_AVG_QUOTE_VOLUME_USDT = 10_000_000  # liquidity rule: 30-day average daily turnover
 VOLUME_WINDOW_DAYS = 30
 MIN_HISTORY_DAYS = 365
-PEG_LOW = 0.98    # 30d close range inside [PEG_LOW, PEG_HIGH] => USD-pegged asset
+PEG_LOW = 0.98  # 30d close range inside [PEG_LOW, PEG_HIGH] => USD-pegged asset
 PEG_HIGH = 1.02
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_PATH = PROJECT_ROOT / "config" / "symbols.csv"
 
 EXCLUDED_BASE_ASSETS = {
     # Stablecoins / fiat-like (price vs USDT ~ 1)
-    "USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USDP", "PYUSD", "USDE",
-    "EUR", "EURI", "AEUR", "XUSD", "BFUSD", "RLUSD", "USD1", "RWUSD",
+    "USDC",
+    "FDUSD",
+    "TUSD",
+    "BUSD",
+    "DAI",
+    "USDP",
+    "PYUSD",
+    "USDE",
+    "EUR",
+    "EURI",
+    "AEUR",
+    "XUSD",
+    "BFUSD",
+    "RLUSD",
+    "USD1",
+    "RWUSD",
     # Commodity-backed tokens (track gold, not crypto market)
-    "PAXG", "XAUT",
+    "PAXG",
+    "XAUT",
     # Wrapped duplicates
-    "WBTC", "WBETH",
+    "WBTC",
+    "WBETH",
 }
 
 
@@ -115,8 +131,7 @@ def select_symbols(client: SymbolsSource, now: datetime) -> list[dict[str, Any]]
         first_open = get_first_open_time(client, symbol)
         if first_open > cutoff:
             print(
-                f"  skip {symbol}: listed {first_open:%Y-%m-%d}, "
-                f"history < {MIN_HISTORY_DAYS} days"
+                f"  skip {symbol}: listed {first_open:%Y-%m-%d}, history < {MIN_HISTORY_DAYS} days"
             )
             continue
 

@@ -58,8 +58,18 @@ def make_daily_klines(
     """
     return [
         [
-            open_ms, close, close, close, close, "1.00000000",
-            open_ms + DAY_MS - 1, quote_volume, 42, "0.50000000", "0", "0",
+            open_ms,
+            close,
+            close,
+            close,
+            close,
+            "1.00000000",
+            open_ms + DAY_MS - 1,
+            quote_volume,
+            42,
+            "0.50000000",
+            "0",
+            "0",
         ]
         for open_ms in range(first_open_ms, last_open_ms + 1, DAY_MS)
     ]
