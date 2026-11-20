@@ -16,6 +16,7 @@
 --   CRYPTO_DWH_ROLE         project role (loader + dbt); owns tables and views
 --   CRYPTO_WH               X-Small warehouse, suspends after 60 s idle
 --   CRYPTO_DWH              database with schemas RAW, STAGING, MARTS
+--   CRYPTO_LOADER           service user for ingestion, project role only
 -- =============================================================================
 
 -- The user running this script gets the project role (see section 2).
@@ -141,3 +142,26 @@ ALTER WAREHOUSE IF EXISTS COMPUTE_WH SET
 ALTER WAREHOUSE IF EXISTS SNOWFLAKE_LEARNING_WH SET
     AUTO_SUSPEND = 60
     STATEMENT_TIMEOUT_IN_SECONDS = 600;
+
+
+-- -----------------------------------------------------------------------------
+-- 5. Service user for the loader (USERADMIN creates and owns users)
+-- -----------------------------------------------------------------------------
+-- TYPE = SERVICE: no password, no MFA; authenticates with a key pair only.
+-- Granted the project role alone, so secondary roles cannot widen its rights.
+-- The public key is registered separately and is not part of this script:
+--   ALTER USER CRYPTO_LOADER ADD KEY PAIR <key_name> PUBLIC_KEY = '<base64>';
+USE ROLE USERADMIN;
+
+CREATE USER IF NOT EXISTS CRYPTO_LOADER
+    TYPE = SERVICE
+    COMMENT = 'crypto-market-dwh: ingestion (key-pair auth)';
+
+ALTER USER CRYPTO_LOADER SET
+    DEFAULT_ROLE = CRYPTO_DWH_ROLE
+    DEFAULT_WAREHOUSE = CRYPTO_WH
+    DEFAULT_NAMESPACE = CRYPTO_DWH.RAW
+    DEFAULT_SECONDARY_ROLES = ()
+    COMMENT = 'crypto-market-dwh: ingestion (key-pair auth)';
+
+GRANT ROLE CRYPTO_DWH_ROLE TO USER CRYPTO_LOADER;
