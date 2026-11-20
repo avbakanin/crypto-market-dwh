@@ -1,4 +1,4 @@
-"""Tests for the RAW loader: statements, result checks, idempotency guard, pending batches.
+"""Tests for the RAW loader: statements, result checks, guard, pending batches, main.
 
 No Snowflake: statements go to a scripted fake cursor. What Snowflake itself does with
 them (PUT/COPY semantics) is verified on the live account, not here.
@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from ingestion import load_raw_klines
 from ingestion.batches import Manifest, write_manifest
 from ingestion.load_raw_klines import (
     BATCH_STATS_SQL,
@@ -23,12 +24,13 @@ from ingestion.load_raw_klines import (
     copy_sql,
     load_batch,
     load_pending,
+    main,
     pending_batches,
     put_sql,
     reconcile,
 )
 from tests.factories import make_klines
-from tests.fakes import FakeCursor
+from tests.fakes import FakeConnection, FakeCursor
 
 BATCH_ID = "20250102T000000Z"
 SYMBOLS = ("BTCUSDT", "ETHUSDT")
@@ -289,7 +291,7 @@ def test_every_pending_batch_is_loaded_oldest_first(tmp_path: Path) -> None:
         + [[], put_rows(), copy_rows(), stats_rows()] * 2
     )
 
-    assert load_pending(cur, tmp_path) == []
+    assert load_pending(cur, tmp_path) == ([MID, NEW], [])
 
     assert cur.executed == [LOADED_BATCHES_SQL, *load_statements(mid), *load_statements(new)]
     assert [p for p in cur.params if p] == [(MID,), (MID,), (NEW,), (NEW,)]
@@ -299,7 +301,7 @@ def test_nothing_pending_runs_only_the_lookup(tmp_path: Path) -> None:
     write_batch(tmp_path, OLD)
     cur = FakeCursor([[{"_BATCH_ID": OLD}]])
 
-    assert load_pending(cur, tmp_path) == []
+    assert load_pending(cur, tmp_path) == ([], [])
 
     assert cur.executed == [LOADED_BATCHES_SQL]  # no PUT, no COPY
 
@@ -309,7 +311,89 @@ def test_load_stops_at_the_first_batch_that_does_not_reconcile(tmp_path: Path) -
     write_batch(tmp_path, NEW)
     cur = FakeCursor([[], [], put_rows(), copy_rows(), stats_rows(row_count=ROWS + 1)])
 
-    problems = load_pending(cur, tmp_path)
+    loaded, problems = load_pending(cur, tmp_path)
 
+    assert loaded == []
     assert problems == [f"{MID}: {s}: {ROWS + 1} rows, manifest {ROWS}" for s in SYMBOLS]
     assert cur.executed == [LOADED_BATCHES_SQL, *load_statements(mid)]  # NEW is not touched
+
+
+def test_batches_loaded_before_a_failure_are_reported_as_loaded(tmp_path: Path) -> None:
+    write_batch(tmp_path, MID)
+    write_batch(tmp_path, NEW)
+    cur = FakeCursor(
+        [[], [], put_rows(), copy_rows(), stats_rows()]
+        + [[], put_rows(), copy_rows(), stats_rows(row_count=ROWS + 1)]
+    )
+
+    loaded, problems = load_pending(cur, tmp_path)
+
+    assert loaded == [MID]
+    assert len(problems) == len(SYMBOLS)
+
+
+# --- main: exit code and the final line -----------------------------------------------------
+
+
+def run_main(
+    monkeypatch: pytest.MonkeyPatch, root: Path, results: list[list[dict[str, Any]]]
+) -> tuple[int, FakeCursor]:
+    """Run main() on the batches in root with a scripted cursor; no Snowflake, no DDL."""
+    cur = FakeCursor(results)
+    monkeypatch.setattr(load_raw_klines, "OUTPUT_DIR", root)
+    monkeypatch.setattr(load_raw_klines, "connect", lambda: FakeConnection(cur))
+    monkeypatch.setattr(load_raw_klines, "ensure_raw_objects", lambda conn: None)
+    return main([]), cur
+
+
+def last_line(capsys: pytest.CaptureFixture[str]) -> str:
+    return capsys.readouterr().out.strip().splitlines()[-1]
+
+
+def test_main_with_nothing_pending_says_nothing_to_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_batch(tmp_path, OLD)
+
+    exit_code, _ = run_main(monkeypatch, tmp_path, [[{"_BATCH_ID": OLD}]])
+
+    assert exit_code == 0
+    assert last_line(capsys) == "OK: nothing to load"
+
+
+def test_main_names_the_batches_it_loaded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_batch(tmp_path, OLD)
+    write_batch(tmp_path, MID)
+    results = [[{"_BATCH_ID": OLD}], [], put_rows(), copy_rows(), stats_rows()]
+
+    exit_code, _ = run_main(monkeypatch, tmp_path, results)
+
+    assert exit_code == 0
+    assert last_line(capsys) == f"OK: loaded and reconciled {MID}"
+
+
+def test_main_fails_when_a_batch_does_not_reconcile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_batch(tmp_path, MID)
+    results = [[], [], put_rows(), copy_rows(), stats_rows(row_count=ROWS + 1)]
+
+    exit_code, _ = run_main(monkeypatch, tmp_path, results)
+
+    assert exit_code == 1
+    assert "FAIL: a batch does not reconcile" in capsys.readouterr().out
+
+
+def test_main_without_any_complete_batch_fails_before_connecting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def refuse() -> FakeConnection:
+        raise AssertionError("main connected to Snowflake")
+
+    monkeypatch.setattr(load_raw_klines, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(load_raw_klines, "connect", refuse)
+
+    assert main([]) == 1
+    assert "No complete batch" in capsys.readouterr().out

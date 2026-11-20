@@ -202,24 +202,27 @@ def report_reconciled(manifest: Manifest) -> None:
     )
 
 
-def load_pending(cur: Cursor, root: Path) -> list[str]:
+def load_pending(cur: Cursor, root: Path) -> tuple[list[str], list[str]]:
     """Load every pending batch, oldest first; stop at the first one that does not reconcile.
 
-    Returns its problems, each prefixed with the batch id (empty = every batch reconciles).
+    Returns the ids of the batches loaded and reconciled by this call, and the problems of
+    the batch it stopped at, each prefixed with the batch id (empty = all reconciled).
     """
-    loaded = {r["_batch_id"] for r in query(cur, LOADED_BATCHES_SQL)}
-    pending = pending_batches(root, loaded)
+    in_raw = {r["_batch_id"] for r in query(cur, LOADED_BATCHES_SQL)}
+    pending = pending_batches(root, in_raw)
     if not pending:
-        print(f"Nothing to load: every complete batch in {root} is in {TABLE}")
-        return []
+        print(f"Every complete batch in {root} is in {TABLE}")
+        return [], []
     print(f"Batches not in {TABLE} yet: {len(pending)} ({', '.join(d.name for d in pending)})")
+    loaded: list[str] = []
     for batch_dir in pending:
         manifest = read_manifest(batch_dir)
         problems = load_batch(cur, batch_dir, manifest)
         if problems:
-            return [f"{batch_dir.name}: {problem}" for problem in problems]
+            return loaded, [f"{batch_dir.name}: {problem}" for problem in problems]
         report_reconciled(manifest)
-    return []
+        loaded.append(batch_dir.name)
+    return loaded, []
 
 
 def ensure_raw_objects(conn: SnowflakeConnection) -> None:
@@ -243,20 +246,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         ensure_raw_objects(conn)
         with conn.cursor(DictCursor) as cur:
             if one is None:
-                problems = load_pending(cur, OUTPUT_DIR)
+                loaded, problems = load_pending(cur, OUTPUT_DIR)
+                ok = f"loaded and reconciled {', '.join(loaded)}" if loaded else "nothing to load"
             else:
                 problems = [
                     f"{args.batch}: {p}" for p in load_batch(cur, OUTPUT_DIR / args.batch, one)
                 ]
                 if not problems:
                     report_reconciled(one)
+                ok = f"batch {args.batch} reconciles with its manifest"
 
     if problems:
         print("\nFAIL: a batch does not reconcile with its manifest; later batches are not loaded:")
         for problem in problems:
             print(f"  {problem}")
         return 1
-    print("\nOK: every batch loaded by this run reconciles with its manifest")
+    print(f"\nOK: {ok}")
     return 0
 
 

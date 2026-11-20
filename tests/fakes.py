@@ -1,4 +1,4 @@
-"""Test doubles: in-memory stand-ins for BinanceClient and a Snowflake cursor."""
+"""Test doubles: in-memory stand-ins for BinanceClient and a Snowflake connection and cursor."""
 
 from __future__ import annotations
 
@@ -103,3 +103,25 @@ class FakeCursor:
 
     def fetchall(self) -> list[Any]:
         return self._rows
+
+    def __enter__(self) -> FakeCursor:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+
+class FakeConnection:
+    """Stand-in for a SnowflakeConnection in loader.main: hands out one scripted cursor."""
+
+    def __init__(self, cursor: FakeCursor) -> None:
+        self._cursor = cursor
+
+    def cursor(self, cursor_class: object = None) -> FakeCursor:
+        return self._cursor
+
+    def __enter__(self) -> FakeConnection:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
