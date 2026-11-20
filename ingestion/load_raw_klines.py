@@ -1,11 +1,12 @@
-"""Load one extracted klines batch into Snowflake RAW: PUT to the stage, COPY INTO the table.
+"""Load extracted klines batches into Snowflake RAW: PUT to the stage, COPY INTO the table.
 
 Run from repo root: python -m ingestion.load_raw_klines [--batch BATCH_ID]
-Default batch: the latest complete one in data/raw/klines_1h (see batches.py).
+Default: every complete batch in data/raw/klines_1h that is not in RAW yet, oldest first
+(the load watermark is the set of _batch_id values in the table); --batch loads one.
 
 Idempotent: a batch already in the table is not loaded again; COPY's load metadata
-skips files it has loaded before. Exit code 1 if the loaded batch does not reconcile
-with its manifest (row counts per symbol, duplicates).
+skips files it has loaded before. Exit code 1 if a loaded batch does not reconcile
+with its manifest (row counts per symbol, duplicates); later batches wait for a human.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from typing import Any, Protocol
 
 from snowflake.connector import DictCursor, SnowflakeConnection
 
-from ingestion.batches import Manifest, is_batch_id, latest_complete_batch, read_manifest
+from ingestion.batches import Manifest, complete_batches, is_batch_id, read_manifest
 from ingestion.clients.snowflake_conn import connect
 from ingestion.extract_klines import OUTPUT_DIR
 
@@ -118,6 +119,9 @@ GROUP BY symbol
 """
 
 
+LOADED_BATCHES_SQL = f"SELECT DISTINCT _batch_id FROM {TABLE}"
+
+
 def check_put_results(rows: list[dict[str, Any]], manifest: Manifest) -> None:
     """Every manifest file reached the stage (uploaded now or already there)."""
     bad = [r for r in rows if r["status"] not in PUT_OK_STATUSES]
@@ -185,33 +189,74 @@ def load_batch(cur: Cursor, batch_dir: Path, manifest: Manifest) -> list[str]:
     return reconcile(stats, manifest)
 
 
+def pending_batches(root: Path, loaded: set[str]) -> list[Path]:
+    """Complete batches that are not in RAW yet, oldest first: the order they were extracted in."""
+    return [d for d in complete_batches(root) if d.name not in loaded]
+
+
+def report_reconciled(manifest: Manifest) -> None:
+    rows = sum(s["rows"] for s in manifest["symbols"].values())
+    print(
+        f"Batch {manifest['batch_id']} reconciles: {len(manifest['symbols'])} symbols, "
+        f"{rows} rows, duplicates as in the manifest"
+    )
+
+
+def load_pending(cur: Cursor, root: Path) -> list[str]:
+    """Load every pending batch, oldest first; stop at the first one that does not reconcile.
+
+    Returns its problems, each prefixed with the batch id (empty = every batch reconciles).
+    """
+    loaded = {r["_batch_id"] for r in query(cur, LOADED_BATCHES_SQL)}
+    pending = pending_batches(root, loaded)
+    if not pending:
+        print(f"Nothing to load: every complete batch in {root} is in {TABLE}")
+        return []
+    print(f"Batches not in {TABLE} yet: {len(pending)} ({', '.join(d.name for d in pending)})")
+    for batch_dir in pending:
+        manifest = read_manifest(batch_dir)
+        problems = load_batch(cur, batch_dir, manifest)
+        if problems:
+            return [f"{batch_dir.name}: {problem}" for problem in problems]
+        report_reconciled(manifest)
+    return []
+
+
 def ensure_raw_objects(conn: SnowflakeConnection) -> None:
     """Create the stage, file format and table if missing (snowflake/raw_klines.sql)."""
     conn.execute_string(DDL_PATH.read_text(encoding="utf-8"), return_cursors=False)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Load a klines batch into Snowflake RAW.")
-    parser.add_argument("--batch", help="batch id (default: the latest complete batch)")
+    parser = argparse.ArgumentParser(description="Load klines batches into Snowflake RAW.")
+    parser.add_argument(
+        "--batch", help="load only this batch id (default: every pending batch, oldest first)"
+    )
     args = parser.parse_args(argv)
 
-    batch_dir = OUTPUT_DIR / args.batch if args.batch else latest_complete_batch(OUTPUT_DIR)
-    manifest = read_manifest(batch_dir)
+    one = read_manifest(OUTPUT_DIR / args.batch) if args.batch else None  # fail before connecting
+    if one is None and not complete_batches(OUTPUT_DIR):
+        print(f"No complete batch in {OUTPUT_DIR}: run python -m ingestion.extract_klines first")
+        return 1
+
     with connect() as conn:
         ensure_raw_objects(conn)
         with conn.cursor(DictCursor) as cur:
-            problems = load_batch(cur, batch_dir, manifest)
+            if one is None:
+                problems = load_pending(cur, OUTPUT_DIR)
+            else:
+                problems = [
+                    f"{args.batch}: {p}" for p in load_batch(cur, OUTPUT_DIR / args.batch, one)
+                ]
+                if not problems:
+                    report_reconciled(one)
 
-    expected_rows = sum(s["rows"] for s in manifest["symbols"].values())
     if problems:
-        print(f"\nFAIL: batch {manifest['batch_id']} does not reconcile with its manifest:")
+        print("\nFAIL: a batch does not reconcile with its manifest; later batches are not loaded:")
         for problem in problems:
             print(f"  {problem}")
         return 1
-    print(
-        f"\nOK: batch {manifest['batch_id']} reconciles: {len(manifest['symbols'])} symbols, "
-        f"{expected_rows} rows, duplicates as in the manifest"
-    )
+    print("\nOK: every batch loaded by this run reconciles with its manifest")
     return 0
 
 

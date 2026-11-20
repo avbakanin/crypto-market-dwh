@@ -1,4 +1,4 @@
-"""Tests for the RAW loader: statements it builds, how it checks results, idempotency guard.
+"""Tests for the RAW loader: statements, result checks, idempotency guard, pending batches.
 
 No Snowflake: statements go to a scripted fake cursor. What Snowflake itself does with
 them (PUT/COPY semantics) is verified on the live account, not here.
@@ -15,12 +15,15 @@ import pytest
 from ingestion.batches import Manifest, write_manifest
 from ingestion.load_raw_klines import (
     BATCH_STATS_SQL,
+    LOADED_BATCHES_SQL,
     LoadError,
     check_copy_results,
     check_local_files,
     check_put_results,
     copy_sql,
     load_batch,
+    load_pending,
+    pending_batches,
     put_sql,
     reconcile,
 )
@@ -32,23 +35,27 @@ SYMBOLS = ("BTCUSDT", "ETHUSDT")
 ROWS = 24
 
 
-def make_manifest(rows: int = ROWS, duplicates: int = 0) -> Manifest:
+def make_manifest(rows: int = ROWS, duplicates: int = 0, batch_id: str = BATCH_ID) -> Manifest:
     return {
-        "batch_id": BATCH_ID,
+        "batch_id": batch_id,
         "as_of_utc": "2025-01-02T00:00:00+00:00",
         "interval": "1h",
         "symbols": {s: {"rows": rows, "duplicates": duplicates, "gaps": 0} for s in SYMBOLS},
     }
 
 
-@pytest.fixture
-def batch_dir(tmp_path: Path) -> Path:
-    path = tmp_path / BATCH_ID
+def write_batch(root: Path, batch_id: str = BATCH_ID) -> Path:
+    path = root / batch_id
     path.mkdir()
     for symbol in SYMBOLS:
         (path / f"{symbol}.json").write_text(json.dumps(make_klines(ROWS)), encoding="utf-8")
-    write_manifest(path, make_manifest())
+    write_manifest(path, make_manifest(batch_id=batch_id))
     return path
+
+
+@pytest.fixture
+def batch_dir(tmp_path: Path) -> Path:
+    return write_batch(tmp_path)
 
 
 def put_rows(status: str = "UPLOADED") -> list[dict[str, Any]]:
@@ -249,3 +256,60 @@ def test_local_mismatch_stops_before_any_statement(batch_dir: Path) -> None:
         load_batch(cur, batch_dir, make_manifest())
 
     assert cur.executed == []
+
+
+# --- pending batches: load watermark = _batch_id values in RAW -------------------------------
+
+OLD, MID, NEW = "20250101T000000Z", "20250102T000000Z", "20250103T000000Z"
+
+
+def load_statements(batch_dir: Path) -> list[str]:
+    """What load_batch runs for a batch that is not in the table yet."""
+    return [
+        BATCH_STATS_SQL,
+        put_sql(batch_dir),
+        copy_sql(batch_dir.name, list(SYMBOLS)),
+        BATCH_STATS_SQL,
+    ]
+
+
+def test_pending_batches_are_complete_ones_not_in_raw_oldest_first(tmp_path: Path) -> None:
+    new, old = write_batch(tmp_path, NEW), write_batch(tmp_path, OLD)
+    write_batch(tmp_path, MID)
+    (tmp_path / "20250104T000000Z").mkdir()  # extract crashed: no manifest
+
+    assert pending_batches(tmp_path, loaded={MID}) == [old, new]
+
+
+def test_every_pending_batch_is_loaded_oldest_first(tmp_path: Path) -> None:
+    write_batch(tmp_path, OLD)
+    mid, new = write_batch(tmp_path, MID), write_batch(tmp_path, NEW)
+    cur = FakeCursor(
+        [[{"_BATCH_ID": OLD}]]  # upper-case key, as Snowflake returns the column
+        + [[], put_rows(), copy_rows(), stats_rows()] * 2
+    )
+
+    assert load_pending(cur, tmp_path) == []
+
+    assert cur.executed == [LOADED_BATCHES_SQL, *load_statements(mid), *load_statements(new)]
+    assert [p for p in cur.params if p] == [(MID,), (MID,), (NEW,), (NEW,)]
+
+
+def test_nothing_pending_runs_only_the_lookup(tmp_path: Path) -> None:
+    write_batch(tmp_path, OLD)
+    cur = FakeCursor([[{"_BATCH_ID": OLD}]])
+
+    assert load_pending(cur, tmp_path) == []
+
+    assert cur.executed == [LOADED_BATCHES_SQL]  # no PUT, no COPY
+
+
+def test_load_stops_at_the_first_batch_that_does_not_reconcile(tmp_path: Path) -> None:
+    mid = write_batch(tmp_path, MID)
+    write_batch(tmp_path, NEW)
+    cur = FakeCursor([[], [], put_rows(), copy_rows(), stats_rows(row_count=ROWS + 1)])
+
+    problems = load_pending(cur, tmp_path)
+
+    assert problems == [f"{MID}: {s}: {ROWS + 1} rows, manifest {ROWS}" for s in SYMBOLS]
+    assert cur.executed == [LOADED_BATCHES_SQL, *load_statements(mid)]  # NEW is not touched
