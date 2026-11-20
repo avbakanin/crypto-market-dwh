@@ -1,7 +1,10 @@
-"""Extract hourly klines for whitelisted symbols from Binance into a new batch directory.
+"""Extract new hourly klines for whitelisted symbols from Binance into a new batch directory.
 
 Run from repo root: python -m ingestion.extract_klines
-Writes data/raw/klines_1h/<batch_id>/<SYMBOL>.json and, last, _manifest.json (see batches.py).
+Incremental: each symbol starts from its high-water mark (the newest candle already
+extracted, see batches.high_water_marks), re-reading OVERLAP_CANDLES; a symbol with no
+mark gets the full HISTORY_DAYS window. Writes data/raw/klines_1h/<batch_id>/<SYMBOL>.json
+and, last, _manifest.json (see batches.py). Nothing new -> no batch.
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol
 
-from ingestion.batches import Manifest, batch_id_for, write_manifest
+from ingestion.batches import Manifest, batch_id_for, high_water_marks, write_manifest
 from ingestion.clients.binance import BinanceClient
 
 Kline = list[Any]
@@ -32,6 +35,7 @@ INTERVAL_MS = INTERVAL_MS_BY_NAME[INTERVAL]  # unsupported INTERVAL fails at imp
 OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / f"klines_{INTERVAL}"
 PAGE_LIMIT = 1000
 HISTORY_DAYS = 365
+OVERLAP_CANDLES = 1  # re-read the newest extracted candle: proves the seam, heals a fast clock
 PAUSE_S = 0.2  # politeness pause between pages
 
 
@@ -69,6 +73,26 @@ def fetch_history(client: KlinesSource, symbol: str, start_ms: int, now_ms: int)
     return all_klines
 
 
+def last_closed_open_ms(now_ms: int) -> int:
+    """open_time of the newest candle closed before now_ms (open + INTERVAL_MS - 1 < now_ms)."""
+    return (now_ms - INTERVAL_MS) // INTERVAL_MS * INTERVAL_MS
+
+
+def start_ms_for(mark: int | None, now_ms: int) -> int:
+    """First open_time to request: the history window for a new symbol, else the newest
+    OVERLAP_CANDLES already extracted; never earlier than the history window."""
+    window_start = now_ms - HISTORY_DAYS * DAY_MS
+    if mark is None:
+        return window_start
+    return max(window_start, mark - (OVERLAP_CANDLES - 1) * INTERVAL_MS)
+
+
+def expected_candles(start_ms: int, now_ms: int) -> int:
+    """Closed candles on the interval grid with open_time >= start_ms (DQ: compare with rows)."""
+    first = -(-start_ms // INTERVAL_MS) * INTERVAL_MS  # first grid point at or after start_ms
+    return max(0, (last_closed_open_ms(now_ms) - first) // INTERVAL_MS + 1)
+
+
 def drop_unclosed(klines: list[Kline], now_ms: int) -> list[Kline]:
     """Keep only candles closed before the run's as-of moment (DQ note #2)."""
     return [k for k in klines if k[6] < now_ms]
@@ -93,25 +117,52 @@ def ms_to_utc(ms: int) -> datetime:
 
 def extract_batch(
     client: KlinesSource, symbols: list[str], now_ms: int, output_dir: Path = OUTPUT_DIR
-) -> Path:
-    """Extract every symbol into a new batch directory; the manifest is written last."""
+) -> Path | None:
+    """Extract what is new since each symbol's high-water mark into a new batch directory.
+
+    Returns the batch directory, or None when no symbol has a new closed candle: an empty
+    batch adds no rows to RAW, so the loader would never see it as loaded and retry it forever.
+    """
     batch_id = batch_id_for(now_ms)
     batch_dir = output_dir / batch_id
-    batch_dir.mkdir(parents=True)  # no exist_ok: a batch is written once and never overwritten
-    start_ms = now_ms - HISTORY_DAYS * DAY_MS
+    if batch_dir.exists():  # a batch is written once and never overwritten
+        raise FileExistsError(f"Batch {batch_dir} already exists")
+    marks = high_water_marks(output_dir)
+    newest_closed = last_closed_open_ms(now_ms)
 
     results: dict[str, dict[str, int]] = {}
+    no_new: list[str] = []
     for i, symbol in enumerate(symbols, start=1):
+        prefix = f"[{i:>2}/{len(symbols)}] {symbol:<10}"
+        mark = marks.get(symbol)
+        if mark is not None and mark >= newest_closed:
+            print(f"{prefix} up to date")  # no new closed candle can exist: no request
+            continue
+        start_ms = start_ms_for(mark, now_ms)
+        new_from = start_ms if mark is None else max(start_ms, mark + INTERVAL_MS)
         klines = drop_unclosed(fetch_history(client, symbol, start_ms, now_ms), now_ms)
+        if not any(k[0] >= new_from for k in klines):
+            # Trading halted or delisted? The symbol stays out of the batch.
+            no_new.append(symbol)
+            expected_new = expected_candles(new_from, now_ms)
+            print(f"{prefix} WARNING: no new candles, expected {expected_new}")
+            continue
+
         stats = check_klines(klines)
-        if klines:
-            stats["last_open_ms"] = max(k[0] for k in klines)  # the next run's watermark
+        stats["expected"] = expected_candles(start_ms, now_ms)
+        stats["last_open_ms"] = max(k[0] for k in klines)  # the next run's high-water mark
+        if not results:
+            batch_dir.mkdir(parents=True)  # by the first symbol with new candles
         results[symbol] = stats
         (batch_dir / f"{symbol}.json").write_text(json.dumps(klines), encoding="utf-8")
         print(
-            f"[{i:>2}/{len(symbols)}] {symbol:<10} rows={stats['rows']:>5} "
-            f"dup={stats['duplicates']} gaps={stats['gaps']}"
+            f"{prefix} from {ms_to_utc(start_ms):%Y-%m-%d %H:%M} rows={stats['rows']:>5} "
+            f"expected={stats['expected']:>5} dup={stats['duplicates']} gaps={stats['gaps']}"
         )
+
+    if not results:
+        print(f"\nNothing new as of {ms_to_utc(now_ms):%Y-%m-%d %H:%M} UTC: no batch written")
+        return None
 
     manifest: Manifest = {
         "batch_id": batch_id,
@@ -121,8 +172,14 @@ def extract_batch(
     }
     write_manifest(batch_dir, manifest)  # last: a batch without a manifest is incomplete
 
-    with_issues = [s for s, st in results.items() if st["duplicates"] or st["gaps"]]
+    with_issues = [
+        s
+        for s, st in results.items()
+        if st["duplicates"] or st["gaps"] or st["rows"] - st["duplicates"] != st["expected"]
+    ]
     print(f"\nDone: {len(results)} symbols, with DQ issues: {len(with_issues)} {with_issues or ''}")
+    if no_new:
+        print(f"No new candles (left out of the batch): {no_new}")
     print(f"Batch: {batch_dir}")
     return batch_dir
 
