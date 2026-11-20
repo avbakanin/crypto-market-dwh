@@ -1,7 +1,8 @@
-"""Test doubles: an in-memory stand-in for BinanceClient, no network needed."""
+"""Test doubles: in-memory stand-ins for BinanceClient and a Snowflake cursor."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from ingestion.extract_klines import Kline
@@ -78,3 +79,27 @@ class FakeBinance:
         if end_time is not None:
             rows = [k for k in rows if k[0] <= end_time]
         return rows[:limit] if start_time is not None else rows[-limit:]
+
+
+class FakeCursor:
+    """Scripted Snowflake DictCursor: answers each execute() with the next scripted result.
+
+    Records every statement and its parameters; an unscripted statement fails the test.
+    """
+
+    def __init__(self, results: list[list[dict[str, Any]]]) -> None:
+        self._results = list(results)
+        self._rows: list[dict[str, Any]] = []
+        self.executed: list[str] = []
+        self.params: list[Sequence[Any] | None] = []
+
+    def execute(self, operation: str, parameters: Sequence[Any] | None = None, /) -> FakeCursor:
+        if not self._results:
+            raise AssertionError(f"Unexpected statement: {operation}")
+        self.executed.append(operation)
+        self.params.append(parameters)
+        self._rows = self._results.pop(0)
+        return self
+
+    def fetchall(self) -> list[Any]:
+        return self._rows
