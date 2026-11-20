@@ -153,6 +153,14 @@ def test_copy_that_processed_no_files_stops_the_load() -> None:
         check_copy_results(rows, make_manifest())
 
 
+def test_copy_that_skipped_files_loaded_before_stops_the_load() -> None:
+    rows = copy_rows(rows_loaded=0, status="LOAD_SKIPPED")
+    for row in rows:
+        row["first_error"] = "File was loaded before."  # live answer to COPY ... FILES = (...)
+    with pytest.raises(LoadError, match="skipped it as loaded before"):
+        check_copy_results(rows, make_manifest())
+
+
 def test_copy_with_fewer_rows_than_the_manifest_stops_the_load() -> None:
     with pytest.raises(LoadError, match="rows_loaded 23, expected 24"):
         check_copy_results(copy_rows(rows_loaded=ROWS - 1), make_manifest())

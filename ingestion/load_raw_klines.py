@@ -132,14 +132,19 @@ def check_put_results(rows: list[dict[str, Any]], manifest: Manifest) -> None:
 def check_copy_results(rows: list[dict[str, Any]], manifest: Manifest) -> None:
     """COPY loaded every manifest file completely; anything else stops the run."""
     if "file" not in (rows[0] if rows else {}):
-        # e.g. "Copy executed with 0 files processed.": load metadata says already loaded,
-        # yet the batch is not in the table (rows deleted?). Reloading needs a human decision.
+        # e.g. "Copy executed with 0 files processed." (COPY without FILES; not seen live:
+        # with FILES, COPY answers per file, see LOAD_SKIPPED below).
         raise LoadError(f"COPY loaded nothing: {rows}")
     loaded = {r["file"].rsplit("/", 1)[-1]: r for r in rows}
     for symbol, stats in manifest["symbols"].items():
         row = loaded.get(f"{symbol}.json.gz")
         if row is None:
             raise LoadError(f"COPY did not process {symbol}.json.gz")
+        if row["status"] == "LOAD_SKIPPED":
+            # Live answer: "File was loaded before." The load metadata says the file is in the
+            # table, yet the batch is not (rows deleted?): a human decides between TRUNCATE
+            # (clears the load metadata) and FORCE.
+            raise LoadError(f"{symbol}: COPY skipped it as loaded before ({row['first_error']})")
         if row["status"] != "LOADED" or row["rows_loaded"] != stats["rows"]:
             raise LoadError(
                 f"{symbol}: status {row['status']}, rows_loaded {row['rows_loaded']}, "
