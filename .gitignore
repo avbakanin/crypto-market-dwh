@@ -226,3 +226,7 @@ __marimo__/
 data/
 
 CLAUDE.md
+
+# private keys (kept outside the repo; this is a safety net)
+*.p8
+*.pem
