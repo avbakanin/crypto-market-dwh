@@ -1,9 +1,11 @@
-"""Test data factories: synthetic Binance klines, no network needed."""
+"""Test data factories: synthetic Binance klines and landing-zone batches, no network needed."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from ingestion.batches import write_manifest
 from ingestion.extract_klines import DAY_MS, INTERVAL_MS, Kline
 
 START_MS = 1_735_689_600_000  # 2025-01-01 00:00:00 UTC, aligned to the hour
@@ -73,3 +75,25 @@ def make_daily_klines(
         ]
         for open_ms in range(first_open_ms, last_open_ms + 1, DAY_MS)
     ]
+
+
+def make_marked_batch(root: Path, batch_id: str, last_open: dict[str, int]) -> Path:
+    """A complete batch whose manifest records last_open_ms per symbol; no data files.
+
+    Enough for high_water_marks, which reads the manifest: seeds what earlier runs extracted.
+    """
+    batch_dir = root / batch_id
+    batch_dir.mkdir(parents=True)
+    write_manifest(
+        batch_dir,
+        {
+            "batch_id": batch_id,
+            "as_of_utc": "2025-01-01T00:00:00+00:00",
+            "interval": "1h",
+            "symbols": {
+                s: {"rows": 1, "duplicates": 0, "gaps": 0, "last_open_ms": ms}
+                for s, ms in last_open.items()
+            },
+        },
+    )
+    return batch_dir

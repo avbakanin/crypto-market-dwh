@@ -57,7 +57,10 @@ def test_manifest_records_as_of_and_stats_of_each_file(tmp_path: Path) -> None:
         "batch_id": "20250102T000000Z",
         "as_of_utc": "2025-01-02T00:00:00+00:00",
         "interval": "1h",
-        "symbols": {s: {"rows": 24, "duplicates": 0, "gaps": 0} for s in SYMBOLS},
+        "symbols": {
+            s: {"rows": 24, "duplicates": 0, "gaps": 0, "last_open_ms": START_MS + 23 * INTERVAL_MS}
+            for s in SYMBOLS
+        },
     }
 
 

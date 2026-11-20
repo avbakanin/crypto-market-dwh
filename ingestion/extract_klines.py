@@ -104,6 +104,8 @@ def extract_batch(
     for i, symbol in enumerate(symbols, start=1):
         klines = drop_unclosed(fetch_history(client, symbol, start_ms, now_ms), now_ms)
         stats = check_klines(klines)
+        if klines:
+            stats["last_open_ms"] = max(k[0] for k in klines)  # the next run's watermark
         results[symbol] = stats
         (batch_dir / f"{symbol}.json").write_text(json.dumps(klines), encoding="utf-8")
         print(

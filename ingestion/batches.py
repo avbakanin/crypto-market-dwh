@@ -25,7 +25,9 @@ class Manifest(TypedDict):
     batch_id: str
     as_of_utc: str
     interval: str
-    symbols: dict[str, dict[str, int]]  # symbol -> check_klines stats of its file
+    # symbol -> stats of its file: check_klines (rows, duplicates, gaps) plus last_open_ms,
+    # the newest open_time in the file (absent in manifests written before Week 2)
+    symbols: dict[str, dict[str, int]]
 
 
 def batch_id_for(as_of_ms: int) -> str:
@@ -49,11 +51,43 @@ def read_manifest(batch_dir: Path) -> Manifest:
     return manifest
 
 
+def complete_batches(root: Path) -> list[Path]:
+    """Batch directories that have a manifest, oldest first; batches without one are incomplete."""
+    if not root.is_dir():
+        return []
+    complete = [d for d in root.iterdir() if is_batch_id(d.name) and (d / MANIFEST_NAME).is_file()]
+    return sorted(complete, key=lambda d: d.name)
+
+
 def latest_complete_batch(root: Path) -> Path:
-    """Newest batch directory that has a manifest; batches without one are incomplete."""
+    """Newest batch directory that has a manifest."""
     if not root.is_dir():
         raise FileNotFoundError(f"No batch directory {root}")
-    complete = [d for d in root.iterdir() if is_batch_id(d.name) and (d / MANIFEST_NAME).is_file()]
+    complete = complete_batches(root)
     if not complete:
         raise FileNotFoundError(f"No complete batch in {root}")
-    return max(complete, key=lambda d: d.name)
+    return complete[-1]
+
+
+def last_open_ms(batch_dir: Path, symbol: str, stats: dict[str, int]) -> int | None:
+    """Newest open_time in a batch file: from the manifest, else (older manifests) the file."""
+    if "last_open_ms" in stats:
+        return stats["last_open_ms"]
+    # The batch is immutable, so an old manifest is never rewritten: read its file instead.
+    klines = json.loads((batch_dir / f"{symbol}.json").read_text(encoding="utf-8"))
+    return max((k[0] for k in klines), default=None)
+
+
+def high_water_marks(root: Path) -> dict[str, int]:
+    """Extract watermark: newest open_time already extracted, per symbol, over complete batches.
+
+    It answers "what has been extracted", not "what has been loaded": the loader closes that
+    gap by loading every complete batch that is not in RAW yet. No batches -> no marks.
+    """
+    marks: dict[str, int] = {}
+    for batch_dir in complete_batches(root):
+        for symbol, stats in read_manifest(batch_dir)["symbols"].items():
+            last = last_open_ms(batch_dir, symbol, stats)
+            if last is not None:
+                marks[symbol] = max(marks.get(symbol, last), last)
+    return marks
