@@ -1,6 +1,7 @@
-"""Extract hourly klines for whitelisted symbols from Binance and save them to JSON.
+"""Extract hourly klines for whitelisted symbols from Binance into a new batch directory.
 
 Run from repo root: python -m ingestion.extract_klines
+Writes data/raw/klines_1h/<batch_id>/<SYMBOL>.json and, last, _manifest.json (see batches.py).
 """
 
 from __future__ import annotations
@@ -13,13 +14,13 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol
 
+from ingestion.batches import Manifest, batch_id_for, write_manifest
 from ingestion.clients.binance import BinanceClient
 
 Kline = list[Any]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SYMBOLS_PATH = PROJECT_ROOT / "config" / "symbols.csv"
-OUTPUT_DIR = PROJECT_ROOT / "data" / "raw"
 
 HOUR_MS = 60 * 60 * 1000
 DAY_MS = 24 * HOUR_MS
@@ -28,6 +29,7 @@ INTERVAL_MS_BY_NAME = {"1h": HOUR_MS, "1d": DAY_MS}
 
 INTERVAL = "1h"
 INTERVAL_MS = INTERVAL_MS_BY_NAME[INTERVAL]  # unsupported INTERVAL fails at import, not mid-run
+OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / f"klines_{INTERVAL}"
 PAGE_LIMIT = 1000
 HISTORY_DAYS = 365
 PAUSE_S = 0.2  # politeness pause between pages
@@ -89,30 +91,49 @@ def ms_to_utc(ms: int) -> datetime:
     return datetime.fromtimestamp(ms / 1000, tz=UTC)
 
 
+def extract_batch(
+    client: KlinesSource, symbols: list[str], now_ms: int, output_dir: Path = OUTPUT_DIR
+) -> Path:
+    """Extract every symbol into a new batch directory; the manifest is written last."""
+    batch_id = batch_id_for(now_ms)
+    batch_dir = output_dir / batch_id
+    batch_dir.mkdir(parents=True)  # no exist_ok: a batch is written once and never overwritten
+    start_ms = now_ms - HISTORY_DAYS * DAY_MS
+
+    results: dict[str, dict[str, int]] = {}
+    for i, symbol in enumerate(symbols, start=1):
+        klines = drop_unclosed(fetch_history(client, symbol, start_ms, now_ms), now_ms)
+        stats = check_klines(klines)
+        results[symbol] = stats
+        (batch_dir / f"{symbol}.json").write_text(json.dumps(klines), encoding="utf-8")
+        print(
+            f"[{i:>2}/{len(symbols)}] {symbol:<10} rows={stats['rows']:>5} "
+            f"dup={stats['duplicates']} gaps={stats['gaps']}"
+        )
+
+    manifest: Manifest = {
+        "batch_id": batch_id,
+        "as_of_utc": ms_to_utc(now_ms).isoformat(),
+        "interval": INTERVAL,
+        "symbols": results,
+    }
+    write_manifest(batch_dir, manifest)  # last: a batch without a manifest is incomplete
+
+    with_issues = [s for s, st in results.items() if st["duplicates"] or st["gaps"]]
+    print(f"\nDone: {len(results)} symbols, with DQ issues: {len(with_issues)} {with_issues or ''}")
+    print(f"Batch: {batch_dir}")
+    return batch_dir
+
+
 def main() -> None:
     symbols = load_symbols()
     now_ms = int(time.time() * 1000)  # single as-of moment for the whole run
-    start_ms = now_ms - HISTORY_DAYS * DAY_MS
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     print(
         f"Extracting {len(symbols)} symbols, {INTERVAL}, "
         f"as of {ms_to_utc(now_ms):%Y-%m-%d %H:%M} UTC"
     )
-
-    results: dict[str, dict[str, int]] = {}
     with BinanceClient() as client:
-        for i, symbol in enumerate(symbols, start=1):
-            klines = drop_unclosed(fetch_history(client, symbol, start_ms, now_ms), now_ms)
-            stats = check_klines(klines)
-            results[symbol] = stats
-            (OUTPUT_DIR / f"{symbol}.json").write_text(json.dumps(klines), encoding="utf-8")
-            print(
-                f"[{i:>2}/{len(symbols)}] {symbol:<10} rows={stats['rows']:>5} "
-                f"dup={stats['duplicates']} gaps={stats['gaps']}"
-            )
-
-    with_issues = [s for s, st in results.items() if st["duplicates"] or st["gaps"]]
-    print(f"\nDone: {len(results)} symbols, with DQ issues: {len(with_issues)} {with_issues or ''}")
+        extract_batch(client, symbols, now_ms)
 
 
 if __name__ == "__main__":
