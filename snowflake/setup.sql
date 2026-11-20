@@ -143,6 +143,14 @@ ALTER WAREHOUSE IF EXISTS SNOWFLAKE_LEARNING_WH SET
     AUTO_SUSPEND = 60
     STATEMENT_TIMEOUT_IN_SECONDS = 600;
 
+-- Trial accounts grant SNOWFLAKE_LEARNING_ROLE to PUBLIC, i.e. to every user,
+-- service users included: USAGE/OPERATE on SNOWFLAKE_LEARNING_WH (Gen2, outside
+-- the daily monitor) and CREATE SCHEMA in SNOWFLAKE_LEARNING_DB. Keep it for
+-- the admin (Snowsight learning features), take it away from everyone else.
+-- Fails loudly on accounts without this role: delete these two lines there.
+GRANT ROLE SNOWFLAKE_LEARNING_ROLE TO USER IDENTIFIER($setup_user);
+REVOKE ROLE SNOWFLAKE_LEARNING_ROLE FROM ROLE PUBLIC;
+
 
 -- -----------------------------------------------------------------------------
 -- 5. Service user for the loader (USERADMIN creates and owns users)
