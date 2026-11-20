@@ -66,4 +66,9 @@ def connect(env: Mapping[str, str] | None = None) -> SnowflakeConnection:
     if env is None:
         load_dotenv(ENV_PATH)
         env = os.environ
-    return snowflake.connector.connect(**connection_params(env))
+    return snowflake.connector.connect(
+        **connection_params(env),
+        # Connector 5.x warns unless set explicitly. False = always log out on close:
+        # the future default, and the loader has no async queries to preserve.
+        enable_server_session_keep_alive_auto_detection=False,
+    )

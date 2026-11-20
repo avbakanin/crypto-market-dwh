@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from ingestion.clients import snowflake_conn
 from ingestion.clients.snowflake_conn import (
     PASSPHRASE_VAR,
     REQUIRED_VARS,
@@ -100,3 +101,25 @@ def test_key_path_expands_home_directory(
     monkeypatch.setenv("USERPROFILE", str(key_file.parent))  # expanduser() on Windows
     env["SNOWFLAKE_PRIVATE_KEY_PATH"] = "~/" + key_file.name
     assert connection_params(env)["private_key_file"] == str(key_file)
+
+
+def test_connect_passes_params_and_sets_keep_alive_detection_explicitly(
+    env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_connect(**kwargs: object) -> str:
+        captured.update(kwargs)
+        return "connection"
+
+    def no_dotenv(*args: object, **kwargs: object) -> bool:
+        raise AssertionError("an explicit env must not read .env")
+
+    monkeypatch.setattr(snowflake_conn.snowflake.connector, "connect", fake_connect)
+    monkeypatch.setattr(snowflake_conn, "load_dotenv", no_dotenv)
+
+    assert snowflake_conn.connect(env) == "connection"
+    assert captured == {
+        **connection_params(env),
+        "enable_server_session_keep_alive_auto_detection": False,
+    }
