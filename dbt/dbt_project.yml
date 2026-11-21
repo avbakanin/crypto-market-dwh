@@ -18,6 +18,13 @@ flags:
   # No telemetry to dbt Labs, no .user.yml cookie next to profiles.yml.
   send_anonymous_usage_stats: false
 
+# DQ log (macros/dq_log.sql): the log table is created before the run if missing,
+# and the result of every node is appended after it, whatever the command.
+on-run-start:
+  - "{{ create_dq_log() }}"
+on-run-end:
+  - "{{ log_dbt_results(results) }}"
+
 models:
   crypto_market_dwh:
     staging:

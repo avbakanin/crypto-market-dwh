@@ -1,0 +1,52 @@
+sources:
+  - name: dq
+    description: >
+      Written by dbt itself, not by the loader: the DQ log the project hooks keep
+      (macros/dq_log.sql). on-run-start creates the table, on-run-end appends to it.
+    schema: DQ
+    tables:
+      - name: dbt_node_results
+        identifier: DBT_NODE_RESULTS
+        description: >
+          One row per executed node (model, seed, test, unit test, source freshness) per
+          dbt invocation. Append-only; times in UTC. Raw dbt values: severity as
+          configured ('ERROR' by default, 'warn'), status as dbt reports it.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [invocation_id, node_unique_id]
+        columns:
+          - name: invocation_id
+            description: dbt's id of the invocation (one dbt command).
+            data_tests: [not_null]
+          - name: run_started_at
+            description: When the invocation started.
+          - name: dbt_command
+            description: build, test, run, seed, source (freshness).
+          - name: invocation_command
+            description: The command line, e.g. "dbt build --select staging".
+          - name: node_unique_id
+            data_tests: [not_null]
+          - name: resource_type
+            description: model, seed, test, unit_test, source.
+          - name: generic_test
+            description: The generic test of a test node (unique, dbt_utils.expression_is_true); NULL for singular tests.
+          - name: tested_node_unique_id
+            description: The node a generic test is attached to or a unit test tests.
+          - name: depends_on_nodes
+            description: Comma-separated unique ids of the nodes this node reads.
+          - name: severity
+            description: Configured severity of a test; NULL for other nodes and unit tests.
+          - name: store_failures_as
+            description: table or view for tests that store their failing rows.
+          - name: failures_relation
+            description: The table or view in DQ holding the failing rows of the test.
+          - name: status
+            description: pass, warn, fail, error, skipped (tests); success, error (models).
+          - name: failures
+            description: Failing rows of a test; NULL for other nodes and skipped tests.
+          - name: execution_time_s
+          - name: completed_at
+            description: End of execution; NULL for skipped nodes.
+          - name: _logged_at
+            description: When the hook appended the row.
