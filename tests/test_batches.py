@@ -137,6 +137,13 @@ def test_incomplete_batch_does_not_move_the_mark(tmp_path: Path) -> None:
     assert high_water_marks(tmp_path) == {"BTCUSDT": hour(10)}
 
 
+def test_mark_of_any_dataset_comes_from_last_ms(tmp_path: Path) -> None:
+    # Funding and open interest manifests name it last_ms; their files have no open_time.
+    make_marked_batch(tmp_path, "20250101T000000Z", {"1000PEPEUSDT": hour(10)}, key="last_ms")
+
+    assert high_water_marks(tmp_path) == {"1000PEPEUSDT": hour(10)}
+
+
 def test_no_batches_means_no_marks(tmp_path: Path) -> None:
     assert high_water_marks(tmp_path / "klines_1h") == {}
 

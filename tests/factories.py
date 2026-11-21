@@ -96,8 +96,11 @@ def make_daily_klines(
     ]
 
 
-def make_marked_batch(root: Path, batch_id: str, last_open: dict[str, int]) -> Path:
-    """A complete batch whose manifest records last_open_ms per symbol; no data files.
+def make_marked_batch(
+    root: Path, batch_id: str, last_open: dict[str, int], key: str = "last_open_ms"
+) -> Path:
+    """A complete batch whose manifest records the newest record time per symbol under `key`
+    (klines: last_open_ms, other datasets: last_ms); no data files.
 
     Enough for high_water_marks, which reads the manifest: seeds what earlier runs extracted.
     """
@@ -110,8 +113,7 @@ def make_marked_batch(root: Path, batch_id: str, last_open: dict[str, int]) -> P
             "as_of_utc": "2025-01-01T00:00:00+00:00",
             "interval": "1h",
             "symbols": {
-                s: {"rows": 1, "duplicates": 0, "gaps": 0, "last_open_ms": ms}
-                for s, ms in last_open.items()
+                s: {"rows": 1, "duplicates": 0, "gaps": 0, key: ms} for s, ms in last_open.items()
             },
         },
     )
