@@ -25,6 +25,9 @@ models:
       # Table, rebuilt in full: one CTAS per model per run (seconds on X-Small); tests
       # and downstream models read a consistent snapshot instead of re-running the dedup.
       +materialized: table
+    marts:
+      +schema: MARTS
+      +materialized: table
 
 seeds:
   crypto_market_dwh:

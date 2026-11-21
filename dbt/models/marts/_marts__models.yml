@@ -1,0 +1,24 @@
+version: 2
+
+models:
+  - name: dim_symbol
+    description: >
+      Whitelisted spot symbols with their USD-M perpetual contract. Type 1: the seeds are
+      snapshots without history (selection volumes, multiplier, interest rate).
+    columns:
+      - name: symbol
+        data_tests: [unique, not_null]
+      - name: base_asset
+        data_tests: [not_null]
+      - name: futures_symbol
+        description: The perpetual contract (1000PEPEUSDT); NULL when the symbol has none.
+        data_tests: [unique]
+      - name: contract_multiplier
+        description: Coins per contract unit; NULL without a perpetual.
+      - name: interest_rate_8h
+        description: Base funding rate per 8 h (0.0001 for most, 0 for BNBUSDT).
+      - name: has_perpetual
+        data_tests: [not_null]
+      - name: avg_quote_volume_30d_usdt
+        description: Selection input as of selected_at_utc, not a current fact.
+
