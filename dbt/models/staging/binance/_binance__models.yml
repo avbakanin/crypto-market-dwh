@@ -44,6 +44,8 @@ models:
                 ready_after_minutes: 60
               config:
                 severity: warn
+                store_failures_as: table
+                alias: dq_klines_missing_hours
       - name: open_price
         data_tests: [not_null]
       - name: high_price
@@ -69,6 +71,8 @@ models:
                 quote: false
               config:
                 severity: warn
+                store_failures_as: table
+                alias: dq_klines_revised_history
       - name: _batch_id
         description: Extract batch of the chosen version (the latest one carrying the key).
 
@@ -91,6 +95,8 @@ models:
             expression: "funding_time_ms - funding_hour_ms between 0 and 999"
           config:
             severity: warn
+            store_failures_as: table
+            alias: dq_funding_time_offset
     columns:
       - name: contract_symbol
         description: The USD-M contract (1000PEPEUSDT), RAW's symbol.
@@ -112,6 +118,8 @@ models:
           - funding_mode_matches_base_rate:
               config:
                 severity: warn
+                store_failures_as: table
+                alias: dq_funding_mode_vs_base_rate
       - name: funding_hour_ms
         data_tests:
           - complete_funding_settlements:
@@ -119,6 +127,8 @@ models:
                 publish_lag_minutes: 5
               config:
                 severity: warn
+                store_failures_as: table
+                alias: dq_funding_missing_settlements
       - name: mark_price
         description: Mark price in contract units; NULL where the source sent "".
       - name: mark_price_per_coin
@@ -145,6 +155,8 @@ models:
                 quote: false
               config:
                 severity: warn
+                store_failures_as: table
+                alias: dq_funding_revised_history
 
   - name: stg_binance__open_interest_1h
     description: >
@@ -191,6 +203,8 @@ models:
                 ready_after_minutes: 5
               config:
                 severity: warn
+                store_failures_as: table
+                alias: dq_open_interest_missing_hours
       - name: _is_revised
         description: True when versions of the key differ, i.e. the source changed history.
         data_tests:
@@ -200,3 +214,5 @@ models:
                 quote: false
               config:
                 severity: warn
+                store_failures_as: table
+                alias: dq_open_interest_revised_history

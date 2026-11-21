@@ -43,6 +43,8 @@ models:
                 expression: "<= 5"
               config:
                 severity: warn
+                store_failures_as: table
+                alias: dq_volume_anomaly
 
   - name: int_binance__hourly_market
     description: >
@@ -65,6 +67,8 @@ models:
                 series_model: ref('dim_symbol')
               config:
                 severity: warn
+                store_failures_as: table
+                alias: dq_market_daily_row_count
       - name: open_interest_coins
         description: Open interest in coins at hour_end; NULL outside the ~30-day history.
       - name: funding_rate

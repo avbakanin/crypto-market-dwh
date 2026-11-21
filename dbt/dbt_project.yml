@@ -34,6 +34,16 @@ models:
       +schema: MARTS
       +materialized: table
 
+data_tests:
+  crypto_market_dwh:
+    # Failing rows of every test go to DQ (the E$ tables of ODI), replaced on each
+    # run; their counts over time are in the DQ log (on-run-end hook). Stop tests:
+    # a view, free to create and empty unless the test fails. Warn tests override
+    # this with a table: a snapshot of the findings that reports read.
+    # No `limit`: it caps the stored rows and the failure count alike.
+    +schema: DQ
+    +store_failures_as: view
+
 vars:
   # Pump rule: a 1h close-to-close rise of at least this much. +20 % happened once in a
   # year for the 23 liquid symbols; 5 % gives about 190 episodes on 21 symbols.

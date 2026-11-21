@@ -1,4 +1,4 @@
-{{ config(severity='warn') }}
+{{ config(severity='warn', store_failures_as='table', alias='dq_spot_futures_divergence') }}
 
 -- Spot and perpetual prices of one coin at each funding settlement: the spot close of the
 -- candle ending at the settlement against the contract's mark price per coin (1000PEPEUSDT
