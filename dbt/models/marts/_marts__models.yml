@@ -76,3 +76,23 @@ models:
         description: Open interest change in coins during the event hour.
       - name: funding_rate_8h_before
         description: Funding per 8 h in force at the event start.
+
+  - name: fct_pump_event_window
+    description: >
+      One row per (pump event, offset) from -pump_window_hours to +pump_window_hours:
+      the hourly profile around each event. Values relative to the event start (end of
+      hour -1); hours outside the loaded history are NULL.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [pump_event_id, offset_hours]
+    columns:
+      - name: pump_event_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_pump_events')
+                field: pump_event_id
+      - name: offset_hours
+        data_tests: [not_null]
