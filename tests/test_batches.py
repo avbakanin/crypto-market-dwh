@@ -9,6 +9,7 @@ import pytest
 
 from ingestion.batches import (
     MANIFEST_NAME,
+    BatchWriter,
     Manifest,
     batch_id_for,
     complete_batches,
@@ -161,3 +162,53 @@ def test_empty_file_without_last_open_gives_no_mark(tmp_path: Path) -> None:
     (batch_dir / "BTCUSDT.json").write_text("[]", encoding="utf-8")
 
     assert high_water_marks(tmp_path) == {}
+
+
+# --- BatchWriter ----------------------------------------------------------------------------
+
+
+def test_writer_refuses_an_existing_batch_when_created(tmp_path: Path) -> None:
+    existing = make_batch(tmp_path, "20250101T000000Z", complete=False)
+    (existing / "BTCUSDT.json").write_text("[1]", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        BatchWriter(tmp_path, START_MS, "1h")
+    assert (existing / "BTCUSDT.json").read_text(encoding="utf-8") == "[1]"
+
+
+def test_writer_refuses_a_batch_another_run_created_meanwhile(tmp_path: Path) -> None:
+    writer = BatchWriter(tmp_path, START_MS, "1h")
+    (tmp_path / "20250101T000000Z").mkdir()  # a concurrent run, same second, got there first
+
+    with pytest.raises(FileExistsError):
+        writer.add("BTCUSDT", [], {"rows": 0})
+
+
+def test_writer_with_nothing_added_leaves_no_trace(tmp_path: Path) -> None:
+    assert BatchWriter(tmp_path, START_MS, "1h").finish() is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_writer_writes_files_as_received_and_the_manifest_only_on_finish(tmp_path: Path) -> None:
+    writer = BatchWriter(tmp_path, START_MS + 999, "1h")
+    writer.add("BTCUSDT", [{"fundingTime": 1}], {"rows": 1, "last_ms": 1})
+    batch_dir = tmp_path / "20250101T000000Z"
+    assert not (batch_dir / MANIFEST_NAME).exists()  # a crash here leaves an incomplete batch
+
+    assert writer.finish() == batch_dir
+    assert json.loads((batch_dir / "BTCUSDT.json").read_text(encoding="utf-8")) == [
+        {"fundingTime": 1}
+    ]
+    assert read_manifest(batch_dir) == {
+        "batch_id": "20250101T000000Z",
+        "as_of_utc": "2025-01-01T00:00:00.999000+00:00",
+        "interval": "1h",
+        "symbols": {"BTCUSDT": {"rows": 1, "last_ms": 1}},
+    }
+
+
+def test_writer_refuses_the_same_symbol_twice(tmp_path: Path) -> None:
+    writer = BatchWriter(tmp_path, START_MS, "1h")
+    writer.add("BTCUSDT", [], {"rows": 0})
+    with pytest.raises(ValueError, match="already in batch"):
+        writer.add("BTCUSDT", [], {"rows": 0})

@@ -14,7 +14,7 @@ import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import Any, TypedDict, cast
 
 BATCH_ID_FORMAT = "%Y%m%dT%H%M%SZ"  # UTC as-of moment: sorts chronologically, safe in paths
 BATCH_ID_PATTERN = re.compile(r"\d{8}T\d{6}Z")
@@ -49,6 +49,47 @@ def read_manifest(batch_dir: Path) -> Manifest:
     if manifest["batch_id"] != batch_dir.name:
         raise ValueError(f"Manifest in {batch_dir.name} describes batch {manifest['batch_id']!r}")
     return manifest
+
+
+class BatchWriter:
+    """Writes one batch of any dataset, keeping the landing-zone invariants in one place:
+
+    - an existing batch directory is refused when the writer is created, before any request;
+    - the directory is created by the first file: a run with nothing new leaves no trace;
+    - the manifest is written last, by finish(): a batch without one is incomplete;
+    - finish() with no file writes nothing and returns None (an empty batch adds no rows to
+      RAW, so the loader would never see it as loaded).
+    """
+
+    def __init__(self, output_dir: Path, as_of_ms: int, interval: str) -> None:
+        self.batch_dir = output_dir / batch_id_for(as_of_ms)
+        if self.batch_dir.exists():  # a batch is written once and never overwritten
+            raise FileExistsError(f"Batch {self.batch_dir} already exists")
+        self.as_of_utc = datetime.fromtimestamp(as_of_ms / 1000, tz=UTC).isoformat()
+        self.interval = interval
+        self.symbols: dict[str, dict[str, int]] = {}
+
+    def add(self, symbol: str, records: list[Any], stats: dict[str, int]) -> None:
+        """Write one symbol's file exactly as received; its stats go into the manifest."""
+        if symbol in self.symbols:
+            raise ValueError(f"{symbol} is already in batch {self.batch_dir.name}")
+        if not self.symbols:
+            self.batch_dir.mkdir(parents=True)  # no exist_ok: guards a concurrent run too
+        (self.batch_dir / f"{symbol}.json").write_text(json.dumps(records), encoding="utf-8")
+        self.symbols[symbol] = stats
+
+    def finish(self) -> Path | None:
+        """Write the manifest, marking the batch complete; None when nothing was added."""
+        if not self.symbols:
+            return None
+        manifest: Manifest = {
+            "batch_id": self.batch_dir.name,
+            "as_of_utc": self.as_of_utc,
+            "interval": self.interval,
+            "symbols": self.symbols,
+        }
+        write_manifest(self.batch_dir, manifest)
+        return self.batch_dir
 
 
 def complete_batches(root: Path) -> list[Path]:

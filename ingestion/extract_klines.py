@@ -10,14 +10,13 @@ and, last, _manifest.json (see batches.py). Nothing new -> no batch.
 from __future__ import annotations
 
 import csv
-import json
 import time
 from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol
 
-from ingestion.batches import Manifest, batch_id_for, high_water_marks, write_manifest
+from ingestion.batches import BatchWriter, high_water_marks
 from ingestion.clients.binance import BinanceClient
 
 Kline = list[Any]
@@ -123,14 +122,10 @@ def extract_batch(
     Returns the batch directory, or None when no symbol has a new closed candle: an empty
     batch adds no rows to RAW, so the loader would never see it as loaded and retry it forever.
     """
-    batch_id = batch_id_for(now_ms)
-    batch_dir = output_dir / batch_id
-    if batch_dir.exists():  # a batch is written once and never overwritten
-        raise FileExistsError(f"Batch {batch_dir} already exists")
+    writer = BatchWriter(output_dir, now_ms, INTERVAL)  # refuses an existing batch up front
     marks = high_water_marks(output_dir)
     newest_closed = last_closed_open_ms(now_ms)
 
-    results: dict[str, dict[str, int]] = {}
     no_new: list[str] = []
     for i, symbol in enumerate(symbols, start=1):
         prefix = f"[{i:>2}/{len(symbols)}] {symbol:<10}"
@@ -151,27 +146,18 @@ def extract_batch(
         stats = check_klines(klines)
         stats["expected"] = expected_candles(start_ms, now_ms)
         stats["last_open_ms"] = max(k[0] for k in klines)  # the next run's high-water mark
-        if not results:
-            batch_dir.mkdir(parents=True)  # by the first symbol with new candles
-        results[symbol] = stats
-        (batch_dir / f"{symbol}.json").write_text(json.dumps(klines), encoding="utf-8")
+        writer.add(symbol, klines, stats)
         print(
             f"{prefix} from {ms_to_utc(start_ms):%Y-%m-%d %H:%M} rows={stats['rows']:>5} "
             f"expected={stats['expected']:>5} dup={stats['duplicates']} gaps={stats['gaps']}"
         )
 
-    if not results:
+    batch_dir = writer.finish()  # the manifest, last: a batch without one is incomplete
+    if batch_dir is None:
         print(f"\nNothing new as of {ms_to_utc(now_ms):%Y-%m-%d %H:%M} UTC: no batch written")
         return None
 
-    manifest: Manifest = {
-        "batch_id": batch_id,
-        "as_of_utc": ms_to_utc(now_ms).isoformat(),
-        "interval": INTERVAL,
-        "symbols": results,
-    }
-    write_manifest(batch_dir, manifest)  # last: a batch without a manifest is incomplete
-
+    results = writer.symbols
     with_issues = [
         s
         for s, st in results.items()
