@@ -2,10 +2,12 @@
 # new local file (a key, another .env, a data dump) never reaches the image.
 *
 !ingestion/
+!dags/
 !dbt/
 !config/
 !snowflake/
 !tests/
+!tests_airflow/
 !pyproject.toml
 !requirements.txt
 !requirements-dbt.txt

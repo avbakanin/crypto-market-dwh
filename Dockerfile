@@ -7,6 +7,7 @@
 #
 #   docker build --target runtime -t crypto-market-dwh:dev .
 #   docker build --target test -t crypto-market-dwh:test . && docker run --rm crypto-market-dwh:test
+#   docker run --rm --entrypoint python crypto-market-dwh:test -m pytest -q tests_airflow
 
 ARG AIRFLOW_IMAGE=apache/airflow:3.4.0-python3.12
 
@@ -46,6 +47,11 @@ FROM runtime AS test
 RUN "${PROJECT_VENV}/bin/pip" install --no-cache-dir --disable-pip-version-check \
         -r "${PROJECT_HOME}/requirements-dev.txt" \
     && "${PROJECT_VENV}/bin/python" -m pyright --version
+
+# DAG tests (tests_airflow/) need Airflow, so they run with Airflow's own
+# interpreter: pytest goes into Airflow's environment in this stage only.
+RUN python -m pip install --no-cache-dir --disable-pip-version-check "pytest>=8.0" \
+    && python -m pip check
 
 # pyproject.toml points pyright at ./.venv; the link makes that path the project venv.
 RUN ln -s "${PROJECT_VENV}" "${PROJECT_HOME}/.venv"
