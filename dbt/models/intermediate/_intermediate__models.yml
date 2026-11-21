@@ -44,3 +44,36 @@ models:
               config:
                 severity: warn
 
+  - name: int_binance__hourly_market
+    description: >
+      int_binance__hourly_returns plus the futures market at the end of each hour: open
+      interest snapshot at hour_end, the last funding settlement at or before hour_end
+      (ASOF join). Open interest exists for the last ~30 days only.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [symbol, open_time_ms]
+    columns:
+      - name: symbol
+        data_tests: [not_null]
+      - name: open_time_ms
+        data_tests:
+          - not_null
+          - complete_daily_row_count:
+              arguments:
+                partition_by: symbol
+                series_model: ref('dim_symbol')
+              config:
+                severity: warn
+      - name: open_interest_coins
+        description: Open interest in coins at hour_end; NULL outside the ~30-day history.
+      - name: funding_rate
+        description: Rate of the last settlement at or before hour_end, per settlement.
+      - name: funding_rate_8h
+        description: funding_rate * 8 / interval, comparable across 4 h and 8 h contracts.
+      - name: funding_premium_8h
+        description: funding_rate_8h - interest_rate_8h, the departure from the calm rate.
+      - name: is_funding_stale
+        description: >
+          The next settlement was due by hour_end and is not there (missed by the
+          platform, or not published yet at the tail). NULL before the funding history.

@@ -45,3 +45,53 @@ unit_tests:
         - {symbol: ETHUSDT, open_time_ms: 1735711200000, return_1h: null, return_4h: null,
            return_zscore: null, return_baseline_hours: 0, quote_volume_baseline: null}
 
+  - name: market_as_of_funding_and_open_interest_at_hour_end
+    description: >
+      ENAUSDT, a 4-hour contract that missed the 04:00 settlement. Each row is the state at
+      the end of its hour: open interest snapshot at hour_end, the last settlement at or
+      before hour_end (a settlement exactly at hour_end counts). Before the first settlement
+      funding is NULL. A due settlement that is not there makes the row stale. Funding is
+      normalised to 8 h and compared with the contract's calm rate. BTCUSDT's older
+      settlement must not be replaced by ENA's newer one (the ON clause).
+    model: int_binance__hourly_market
+    given:
+      - input: ref('int_binance__hourly_returns')
+        rows:
+          - {symbol: ENAUSDT, open_time_ms: 1735682400000}
+          - {symbol: ENAUSDT, open_time_ms: 1735686000000}
+          - {symbol: ENAUSDT, open_time_ms: 1735696800000}
+          - {symbol: ENAUSDT, open_time_ms: 1735700400000}
+          - {symbol: ENAUSDT, open_time_ms: 1735714800000}
+          - {symbol: BTCUSDT, open_time_ms: 1735696800000}
+      - input: ref('stg_binance__open_interest_1h')
+        rows:
+          - {spot_symbol: ENAUSDT, snapshot_time_ms: 1735686000000, open_interest_coins: 900}
+          - {spot_symbol: ENAUSDT, snapshot_time_ms: 1735689600000, open_interest_coins: 1000}
+      - input: ref('stg_binance__funding_rate')
+        rows:
+          - {spot_symbol: ENAUSDT, funding_hour_ms: 1735689600000, funding_rate: 0.00005,
+             interval_hours: 4, interest_rate_8h: 0.0001}
+          - {spot_symbol: ENAUSDT, funding_hour_ms: 1735718400000, funding_rate: 0.0002,
+             interval_hours: 4, interest_rate_8h: 0.0001}
+          - {spot_symbol: BTCUSDT, funding_hour_ms: 1735660800000, funding_rate: 0.0001,
+             interval_hours: 8, interest_rate_8h: 0.0001}
+    expect:
+      rows:
+        - {symbol: ENAUSDT, open_time_ms: 1735682400000, open_interest_coins: 900,
+           funding_rate: null, funding_rate_8h: null, funding_premium_8h: null,
+           hours_since_funding: null, is_funding_stale: null}
+        - {symbol: ENAUSDT, open_time_ms: 1735686000000, open_interest_coins: 1000,
+           funding_rate: 0.00005, funding_rate_8h: 0.0001, funding_premium_8h: 0,
+           hours_since_funding: 0, is_funding_stale: false}
+        - {symbol: ENAUSDT, open_time_ms: 1735696800000, open_interest_coins: null,
+           funding_rate: 0.00005, funding_rate_8h: 0.0001, funding_premium_8h: 0,
+           hours_since_funding: 3, is_funding_stale: false}
+        - {symbol: ENAUSDT, open_time_ms: 1735700400000, open_interest_coins: null,
+           funding_rate: 0.00005, funding_rate_8h: 0.0001, funding_premium_8h: 0,
+           hours_since_funding: 4, is_funding_stale: true}
+        - {symbol: ENAUSDT, open_time_ms: 1735714800000, open_interest_coins: null,
+           funding_rate: 0.0002, funding_rate_8h: 0.0004, funding_premium_8h: 0.0003,
+           hours_since_funding: 0, is_funding_stale: false}
+        - {symbol: BTCUSDT, open_time_ms: 1735696800000, open_interest_coins: null,
+           funding_rate: 0.0001, funding_rate_8h: 0.0001, funding_premium_8h: 0,
+           hours_since_funding: 11, is_funding_stale: true}
