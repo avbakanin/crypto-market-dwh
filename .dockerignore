@@ -1,0 +1,22 @@
+# Allow-list: the build context is empty unless a path is listed here, so a
+# new local file (a key, another .env, a data dump) never reaches the image.
+*
+!ingestion/
+!dbt/
+!config/
+!snowflake/
+!tests/
+!pyproject.toml
+!requirements.txt
+!requirements-dbt.txt
+!requirements-dev.txt
+
+# Generated files and secrets inside the allowed directories stay out too.
+**/__pycache__/
+**/*.py[co]
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+**/.env
+**/*.p8
+**/*.pem
