@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ingestion.batches import write_manifest
-from ingestion.extract_klines import DAY_MS, INTERVAL_MS, Kline
+from ingestion.extract_klines import DAY_MS, HOUR_MS, INTERVAL_MS, Kline
 
 START_MS = 1_735_689_600_000  # 2025-01-01 00:00:00 UTC, aligned to the hour
 
@@ -65,6 +65,25 @@ def make_contract(
         "quoteAsset": quote,
         "marginAsset": quote,
     }
+
+
+def make_funding(symbol: str, funding_ms: int, rate: str = "0.00010000") -> dict[str, Any]:
+    """One record of /fapi/v1/fundingRate in the live shape: numbers as strings."""
+    return {
+        "symbol": symbol,
+        "fundingTime": funding_ms,
+        "fundingRate": rate,
+        "markPrice": "100.00000000",
+        "rateType": "Regular",
+    }
+
+
+def make_fundings(
+    symbol: str, first_ms: int, count: int, interval_hours: int = 8
+) -> list[dict[str, Any]]:
+    """`count` consecutive settlements from first_ms; each lands 0-26 ms after its hour, as live."""
+    step = interval_hours * HOUR_MS
+    return [make_funding(symbol, first_ms + i * step + i * 7 % 27) for i in range(count)]
 
 
 def make_daily_klines(

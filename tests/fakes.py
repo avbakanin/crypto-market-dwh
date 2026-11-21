@@ -125,3 +125,56 @@ class FakeConnection:
 
     def __exit__(self, *exc_info: object) -> None:
         return None
+
+
+class FakeFutures:
+    """Serves the USD-M futures endpoints from memory and records every request.
+
+    Live semantics (verified, Week 2 Step 2): funding_rate with start_time -> the first `limit`
+    records with fundingTime >= start_time (inclusive), ascending; start_time <= 0 is refused,
+    as by the real client; without start_time -> the most recent `limit`. funding_info lists
+    the contracts given an interval. An unknown contract raises KeyError.
+    """
+
+    def __init__(
+        self,
+        funding: dict[str, list[dict[str, Any]]] | None = None,
+        intervals: dict[str, int] | None = None,
+    ) -> None:
+        self._funding = {
+            s: sorted(rows, key=lambda r: r["fundingTime"]) for s, rows in (funding or {}).items()
+        }
+        self._intervals = intervals or {}
+        self.info_calls = 0
+        self.funding_calls: list[tuple[str, int | None]] = []  # (symbol, start_time)
+
+    def funding_info(self) -> list[dict[str, Any]]:
+        self.info_calls += 1
+        return [
+            {
+                "symbol": symbol,
+                "adjustedFundingRateCap": "0.02000000",
+                "adjustedFundingRateFloor": "-0.02000000",
+                "fundingIntervalHours": hours,
+                "disclaimer": False,
+                "updateTime": 0,
+            }
+            for symbol, hours in self._intervals.items()
+        ]
+
+    def funding_rate(
+        self,
+        symbol: str,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        if start_time is not None and start_time <= 0:
+            raise ValueError(f"start_time must be positive, got {start_time}")
+        self.funding_calls.append((symbol, start_time))
+        rows = self._funding[symbol]
+        if end_time is not None:
+            rows = [r for r in rows if r["fundingTime"] <= end_time]
+        if start_time is None:
+            return rows[-limit:]
+        return [r for r in rows if r["fundingTime"] >= start_time][:limit]
