@@ -1,6 +1,8 @@
-# Local stack of crypto-market-dwh.
+# Local stack of crypto-market-dwh: Airflow (LocalExecutor) and the project's
+# own commands, both from the image built by the Dockerfile.
 #
 #   docker compose build project
+#   docker compose up -d                  # Airflow UI on http://localhost:8080
 #   docker compose run --rm project python -m ingestion.check_snowflake
 #   docker compose run --rm project dbt build
 #
@@ -8,6 +10,10 @@
 # nothing from it unless the variable is listed under `environment:`. Host
 # paths in .env (keys, dbt) are replaced by container paths here, and the key
 # files arrive as read-only secrets under /run/secrets.
+#
+# Only the scheduler runs tasks (LocalExecutor), so only the scheduler and the
+# `project` service get the Snowflake variables and keys; the API server, the
+# DAG processor and postgres never see them.
 #
 # `docker compose config` prints the file with secrets filled in: run it only
 # as `docker compose config --quiet`.
@@ -30,7 +36,142 @@ x-project-env: &project-env
   SNOWFLAKE_DBT_PRIVATE_KEY_PATH: /run/secrets/snowflake_dbt_key
   DBT_ENV_SECRET_SNOWFLAKE_DBT_KEY_PASSPHRASE: ${DBT_ENV_SECRET_SNOWFLAKE_DBT_KEY_PASSPHRASE:-}
 
+# Airflow settings shared by every Airflow component. There is no shared
+# airflow.cfg: a container without one writes its own with a random JWT
+# secret, API secret key and Fernet key, so these come from .env instead
+# (`:?` stops compose when one is missing rather than run with a random or
+# empty value).
+x-airflow-env: &airflow-env
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg://airflow:${AIRFLOW_POSTGRES_PASSWORD:?set AIRFLOW_POSTGRES_PASSWORD in .env}@postgres/airflow
+  AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?set AIRFLOW_FERNET_KEY in .env}
+  AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?set AIRFLOW_JWT_SECRET in .env}
+  AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?set AIRFLOW_API_SECRET_KEY in .env}
+  AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+  # DAGs live with the project code (a copy is baked into the image).
+  AIRFLOW__CORE__DAGS_FOLDER: /opt/project/dags
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+
+x-airflow-common: &airflow-common
+  image: crypto-market-dwh:dev
+  # Airflow components start only after the database is migrated.
+  depends_on: &airflow-depends-on
+    postgres:
+      condition: service_healthy
+    airflow-init:
+      condition: service_completed_successfully
+  restart: unless-stopped
+
 services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      # Applied only when the volume is first created; changing it in .env
+      # later needs ALTER USER inside postgres (or a new volume).
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:?set AIRFLOW_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # Migrates the metadata database and creates the admin user, then exits.
+  # Not the image's _AIRFLOW_DB_MIGRATE/_AIRFLOW_WWW_USER_CREATE: the entrypoint
+  # runs those as `... || true`, so a failed migration would still let the
+  # other components start. `users create` leaves an existing user as it is.
+  airflow-init:
+    image: crypto-market-dwh:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *airflow-env
+      AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?set AIRFLOW_ADMIN_PASSWORD in .env}
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        airflow db migrate
+        airflow users create --role Admin \
+          --username "$${AIRFLOW_ADMIN_USERNAME}" --password "$${AIRFLOW_ADMIN_PASSWORD}" \
+          --firstname Airflow --lastname Admin --email admin@localhost
+        airflow version
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: ["api-server"]
+    environment:
+      <<: *airflow-env
+    # Loopback only: the UI is not reachable from the local network.
+    ports:
+      - "127.0.0.1:8080:8080"
+    # Task logs, written by the scheduler and read here for the UI.
+    volumes:
+      - airflow-logs:/opt/airflow/logs
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Runs the tasks (LocalExecutor): the only Airflow component with the
+  # project's Snowflake variables, keys and landing zone.
+  airflow-scheduler:
+    <<: *airflow-common
+    # with-private-keys first (owner-only key copies), then the image's own
+    # entrypoint, which turns `scheduler` into `airflow scheduler`.
+    entrypoint: ["/usr/bin/dumb-init", "--", "with-private-keys", "/entrypoint"]
+    command: ["scheduler"]
+    environment:
+      <<: [*airflow-env, *project-env]
+      PROJECT_KEYS_DIR: /run/project-keys
+    tmpfs:
+      - /run/project-keys
+    volumes:
+      - airflow-logs:/opt/airflow/logs
+      # Development: the repo's DAGs over the baked-in copy, read-only.
+      - ./dags:/opt/project/dags:ro
+      - ./data:/opt/project/data
+    secrets:
+      - snowflake_loader_key
+      - snowflake_dbt_key
+    # Tasks report to the execution API on the API server.
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-apiserver:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: ["dag-processor"]
+    environment:
+      <<: *airflow-env
+    volumes:
+      - airflow-logs:/opt/airflow/logs
+      - ./dags:/opt/project/dags:ro
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   # Runs the project's own commands (ingestion, dbt) without Airflow.
   project:
     build:
@@ -60,6 +201,10 @@ services:
     secrets:
       - snowflake_loader_key
       - snowflake_dbt_key
+
+volumes:
+  airflow-db:
+  airflow-logs:
 
 secrets:
   snowflake_loader_key:
