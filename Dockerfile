@@ -34,6 +34,9 @@ RUN /usr/python/bin/python -m venv "${PROJECT_VENV}" \
     && python -m pip check
 
 COPY --chown=airflow:0 . ${PROJECT_HOME}
+# Copies the Snowflake keys to owner-only files before a command starts
+# (see the script); compose puts it in front of every project command.
+COPY --chown=airflow:0 --chmod=0755 docker/with-private-keys.sh /usr/local/bin/with-private-keys
 RUN cd "${PROJECT_HOME}" && "${PROJECT_VENV}/bin/dbt" deps --project-dir dbt
 
 
