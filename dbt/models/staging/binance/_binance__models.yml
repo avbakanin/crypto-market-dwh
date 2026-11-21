@@ -1,0 +1,150 @@
+version: 2
+
+models:
+  - name: stg_binance__klines_1h
+    description: >
+      Spot 1h candles of the whitelisted symbols, one row per (symbol, open_time): prices
+      and volumes as NUMBER(38, 8), times in UTC, the version from the latest extract
+      batch. A candle covers [open_time, close_time], close_time = open_time + 1 h - 1 ms.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [symbol, open_time_ms]
+      # The UTC timestamp must be the same instant as the source's Unix ms.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "date_part(epoch_millisecond, open_time) = open_time_ms"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "close_time_ms = open_time_ms + 3599999"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              low_price > 0
+              and low_price <= least(open_price, close_price)
+              and high_price >= greatest(open_price, close_price)
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "base_volume >= 0 and quote_volume >= 0 and trade_count >= 0"
+    columns:
+      - name: symbol
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('symbols')
+                field: symbol
+      - name: open_time
+        data_tests: [not_null]
+      - name: open_price
+        data_tests: [not_null]
+      - name: high_price
+        data_tests: [not_null]
+      - name: low_price
+        data_tests: [not_null]
+      - name: close_price
+        data_tests: [not_null]
+      - name: base_volume
+        description: Volume in the base asset (BTC for BTCUSDT).
+        data_tests: [not_null]
+      - name: quote_volume
+        description: Volume in USDT.
+        data_tests: [not_null]
+      - name: _version_count
+        description: Rows for this key in RAW, one per batch that carried the candle.
+      - name: _is_revised
+        description: True when versions of the key differ, i.e. the source changed history.
+      - name: _batch_id
+        description: Extract batch of the chosen version (the latest one carrying the key).
+
+  - name: stg_binance__funding_rate
+    description: >
+      USD-M funding settlements, one row per (contract, settlement hour). The hour is the
+      key (fundingTime lands milliseconds after it). Missed settlements are flagged, not
+      filled in. Contract attributes come from the perpetuals seed.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [contract_symbol, funding_hour_ms]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "date_part(epoch_millisecond, funding_hour) = funding_hour_ms"
+      # Source note 33: 0-26 ms after the hour. A settlement a second late would still key
+      # correctly, but means the hour assumption needs a second look.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "funding_time_ms - funding_hour_ms between 0 and 999"
+          config:
+            severity: warn
+    columns:
+      - name: contract_symbol
+        description: The USD-M contract (1000PEPEUSDT), RAW's symbol.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('perpetuals')
+                field: futures_symbol
+      - name: spot_symbol
+        description: The whitelisted spot symbol of the contract (PEPEUSDT).
+        data_tests: [not_null]
+      - name: funding_hour
+        data_tests: [not_null]
+      - name: funding_rate
+        description: Rate paid per settlement, not per 8 h.
+        data_tests: [not_null]
+      - name: mark_price
+        description: Mark price in contract units; NULL where the source sent "".
+      - name: mark_price_per_coin
+        description: mark_price / contract_multiplier, comparable with spot prices.
+      - name: interval_hours
+        description: >
+          Hours between settlements, the shorter step around this one. Derived: Binance
+          serves only the current interval and no history of changes.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 4, 8]
+                quote: false
+      - name: is_after_missed_settlement
+        description: The previous step is longer than the interval, a settlement is missing.
+        data_tests: [not_null]
+
+  - name: stg_binance__open_interest_1h
+    description: >
+      USD-M hourly open interest, one row per (contract, snapshot hour). RAW is the only
+      copy of this history past about 30 days.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [contract_symbol, snapshot_time_ms]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "date_part(epoch_millisecond, snapshot_time) = snapshot_time_ms"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "mod(snapshot_time_ms, 3600000) = 0"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "open_interest >= 0 and open_interest_usdt >= 0"
+    columns:
+      - name: contract_symbol
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('perpetuals')
+                field: futures_symbol
+      - name: spot_symbol
+        data_tests: [not_null]
+      - name: snapshot_time
+        data_tests: [not_null]
+      - name: open_interest
+        description: Open interest in contract units (1000PEPE for 1000PEPEUSDT).
+        data_tests: [not_null]
+      - name: open_interest_coins
+        description: open_interest * contract_multiplier, in coins.
+      - name: open_interest_usdt
+        description: Open interest value in USDT, independent of the multiplier.
+        data_tests: [not_null]

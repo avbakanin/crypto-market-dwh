@@ -18,6 +18,14 @@ flags:
   # No telemetry to dbt Labs, no .user.yml cookie next to profiles.yml.
   send_anonymous_usage_stats: false
 
+models:
+  crypto_market_dwh:
+    staging:
+      +schema: STAGING
+      # Table, rebuilt in full: one CTAS per model per run (seconds on X-Small); tests
+      # and downstream models read a consistent snapshot instead of re-running the dedup.
+      +materialized: table
+
 seeds:
   crypto_market_dwh:
     +schema: STAGING
