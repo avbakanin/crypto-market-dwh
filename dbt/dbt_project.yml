@@ -35,6 +35,12 @@ models:
       +materialized: table
 
 vars:
+  # Pump rule: a 1h close-to-close rise of at least this much. +20 % happened once in a
+  # year for the 23 liquid symbols; 5 % gives about 190 episodes on 21 symbols.
+  pump_min_return: 0.05
+  # Hours before and after an event. Also the episode cooldown: a rise within this many
+  # hours of the previous qualifying hour extends the episode instead of starting one.
+  pump_window_hours: 24
   # Return z-score baseline: 30 days, at least 7 days of history before it is computed.
   return_zscore_window_hours: 720
   return_zscore_min_hours: 168

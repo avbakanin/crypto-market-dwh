@@ -22,3 +22,57 @@ models:
       - name: avg_quote_volume_30d_usdt
         description: Selection input as of selected_at_utc, not a current fact.
 
+  - name: fct_pump_events
+    description: >
+      One row per pump episode: the first hour of a run of 1h close-to-close rises of at
+      least pump_min_return (5 %), qualifying hours within pump_window_hours (24) of each
+      other being one episode. Metrics over pump_window_hours before and after the event,
+      NULL where the loaded history has no full window.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [symbol, event_open_time_ms]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "return_1h >= {{ var('pump_min_return') }}"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "episode_hours >= 1 and market_breadth >= 1"
+    columns:
+      - name: pump_event_id
+        description: Surrogate key of (symbol, event_open_time_ms).
+        data_tests: [unique, not_null]
+      - name: symbol
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_symbol')
+                field: symbol
+      - name: event_hour
+        description: Open time of the first qualifying hour.
+        data_tests: [not_null]
+      - name: episode_hours
+        description: Qualifying hours in the episode.
+      - name: overlaps_previous_event
+        description: The previous event of the symbol is within 2 * pump_window_hours.
+        data_tests: [not_null]
+      - name: market_breadth
+        description: Symbols, this one included, past the threshold in the same hour.
+      - name: has_full_before_window
+        data_tests: [not_null]
+      - name: has_full_after_window
+        data_tests: [not_null]
+      - name: has_full_open_interest_window
+        description: Open interest in every hour of both windows (history ~30 days).
+        data_tests: [not_null]
+      - name: return_before
+        description: Price change over the window before the event start.
+      - name: return_after
+        description: Price change over the window after the event hour closed.
+      - name: volume_ratio_event
+        description: Event hour quote volume / mean of the 7 days before.
+      - name: open_interest_change_event
+        description: Open interest change in coins during the event hour.
+      - name: funding_rate_8h_before
+        description: Funding per 8 h in force at the event start.
