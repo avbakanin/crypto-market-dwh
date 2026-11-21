@@ -1,14 +1,20 @@
-"""Thin Binance REST client: shared Session, timeouts, retries on transient errors."""
+"""Thin Binance REST clients: shared Session, timeouts, retries on transient errors.
+
+BinanceClient serves spot market data (api.binance.com), BinanceFuturesClient USD-M futures
+market data (fapi.binance.com). Both share the transport in BinanceRestClient; neither
+inherits the other's endpoints, which exist only on its own host.
+"""
 
 from __future__ import annotations
 
 import time
 from types import TracebackType
-from typing import Any
+from typing import Any, Self
 
 import requests
 
-BASE_URL = "https://api.binance.com"
+SPOT_BASE_URL = "https://api.binance.com"
+FUTURES_BASE_URL = "https://fapi.binance.com"
 DEFAULT_TIMEOUT_S = 10
 DEFAULT_MAX_RETRIES = 5
 BACKOFF_BASE_S = 1.0
@@ -27,20 +33,24 @@ class BinanceAPIError(RuntimeError):
         self.body = body
 
 
-class BinanceClient:
+class BinanceRestClient:
+    """Transport shared by the spot and futures clients: Session, GET, retries."""
+
+    DEFAULT_BASE_URL = SPOT_BASE_URL
+
     def __init__(
         self,
-        base_url: str = BASE_URL,
+        base_url: str | None = None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         max_retries: int = DEFAULT_MAX_RETRIES,
     ) -> None:
-        self.base_url = base_url
+        self.base_url = base_url or self.DEFAULT_BASE_URL
         self.timeout_s = timeout_s
         self.max_retries = max_retries
         self.session = requests.Session()
 
     # --- context manager: closes the Session ---
-    def __enter__(self) -> BinanceClient:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(
@@ -102,7 +112,12 @@ class BinanceClient:
         except ValueError:
             return None
 
-    # --- endpoints ---
+
+class BinanceClient(BinanceRestClient):
+    """Spot market data endpoints."""
+
+    DEFAULT_BASE_URL = SPOT_BASE_URL
+
     def exchange_info(self) -> dict[str, Any]:
         return self.get("/api/v3/exchangeInfo")
 
@@ -124,3 +139,55 @@ class BinanceClient:
         if end_time is not None:
             params["endTime"] = end_time
         return self.get("/api/v3/klines", params)
+
+
+class BinanceFuturesClient(BinanceRestClient):
+    """USD-M futures market data endpoints (perpetual contracts: funding rate, open interest)."""
+
+    DEFAULT_BASE_URL = FUTURES_BASE_URL
+
+    def exchange_info(self) -> dict[str, Any]:
+        return self.get("/fapi/v1/exchangeInfo")
+
+    def funding_info(self) -> list[dict[str, Any]]:
+        """Contracts whose funding cap, floor or interval was adjusted; others use the defaults."""
+        return self.get("/fapi/v1/fundingInfo")
+
+    def funding_rate(
+        self,
+        symbol: str,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Funding rate history, ascending: the first `limit` records with
+        start_time <= fundingTime <= end_time (both inclusive, Unix ms UTC)."""
+        if start_time is not None and start_time <= 0:
+            # Live: startTime=0 is taken as "not sent" and returns the most recent records.
+            raise ValueError(f"start_time must be positive, got {start_time}")
+        params: dict[str, Any] = {"symbol": symbol, "limit": limit}
+        if start_time is not None:
+            params["startTime"] = start_time
+        if end_time is not None:
+            params["endTime"] = end_time
+        return self.get("/fapi/v1/fundingRate", params)
+
+    def open_interest_hist(
+        self,
+        symbol: str,
+        period: str,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Open interest snapshots, ascending: the LAST `limit` points with
+        start_time <= timestamp <= end_time (unlike klines and funding, which return the first).
+
+        Only about the latest month is served: an older start_time or end_time is HTTP 400.
+        """
+        params: dict[str, Any] = {"symbol": symbol, "period": period, "limit": limit}
+        if start_time is not None:
+            params["startTime"] = start_time
+        if end_time is not None:
+            params["endTime"] = end_time
+        return self.get("/futures/data/openInterestHist", params)
