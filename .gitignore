@@ -225,6 +225,10 @@ __marimo__/
 # project
 data/
 
+# dbt: installed packages and run logs (target/ is ignored above)
+dbt/dbt_packages/
+dbt/logs/
+
 CLAUDE.md
 
 # private keys (kept outside the repo; this is a safety net)

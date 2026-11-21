@@ -1,0 +1,17 @@
+# dbt project: RAW (loaded by ingestion/) -> STAGING -> MARTS in Snowflake.
+# Run from the repo root: .env sets DBT_PROJECT_DIR=dbt and DBT_PROFILES_DIR=dbt,
+# and dbt loads .env itself. Connection: profiles.yml (no secrets, env vars only).
+name: crypto_market_dwh
+version: "1.0.0"
+profile: crypto_market_dwh
+require-dbt-version: ">=1.12.0"
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+clean-targets: ["target", "dbt_packages"]
+
+flags:
+  # No telemetry to dbt Labs, no .user.yml cookie next to profiles.yml.
+  send_anonymous_usage_stats: false

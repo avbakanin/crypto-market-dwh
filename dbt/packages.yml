@@ -1,0 +1,4 @@
+packages:
+  # unique_combination_of_columns, expression_is_true, accepted_range
+  - package: dbt-labs/dbt_utils
+    version: 1.4.1
