@@ -86,6 +86,22 @@ def make_fundings(
     return [make_funding(symbol, first_ms + i * step + i * 7 % 27) for i in range(count)]
 
 
+def make_open_interest(symbol: str, timestamp_ms: int) -> dict[str, Any]:
+    """One point of /futures/data/openInterestHist in the live shape: numbers as strings."""
+    return {
+        "symbol": symbol,
+        "sumOpenInterest": "96000.00000000",
+        "sumOpenInterestValue": "5600000000.00000000",
+        "CMCCirculatingSupply": "20114434.00000000",
+        "timestamp": timestamp_ms,
+    }
+
+
+def make_open_interests(symbol: str, first_ms: int, count: int) -> list[dict[str, Any]]:
+    """`count` consecutive hourly points from first_ms (on the hour, as live)."""
+    return [make_open_interest(symbol, first_ms + i * HOUR_MS) for i in range(count)]
+
+
 def make_daily_klines(
     first_open_ms: int,
     last_open_ms: int,
