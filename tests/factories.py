@@ -48,6 +48,25 @@ def make_symbol_info(
     }
 
 
+def make_contract(
+    base: str,
+    symbol: str | None = None,
+    contract_type: str = "PERPETUAL",
+    status: str = "TRADING",
+    quote: str = "USDT",
+) -> dict[str, Any]:
+    """Build one entry of the futures exchangeInfo["symbols"] (live field names and values)."""
+    return {
+        "symbol": symbol or base + quote,
+        "pair": base + quote,
+        "contractType": contract_type,
+        "status": status,
+        "baseAsset": base,
+        "quoteAsset": quote,
+        "marginAsset": quote,
+    }
+
+
 def make_daily_klines(
     first_open_ms: int,
     last_open_ms: int,
