@@ -1,12 +1,15 @@
-"""Load extracted klines batches into Snowflake RAW: PUT to the stage, COPY INTO the table.
+"""Load extracted batches into Snowflake RAW: PUT to the dataset's stage, COPY INTO its table.
 
-Run from repo root: python -m ingestion.load_raw_klines [--batch BATCH_ID]
-Default: every complete batch in data/raw/klines_1h that is not in RAW yet, oldest first
-(the load watermark is the set of _batch_id values in the table); --batch loads one.
+Run from repo root: python -m ingestion.load_raw [--dataset NAME] [--batch BATCH_ID]
+Default: every dataset (klines, funding_rate, open_interest) in one session, so one run
+resumes the warehouse once; per dataset, every complete batch that is not in RAW yet, oldest
+first (the load watermark is the set of _batch_id values in its table). --batch loads one
+batch of one --dataset.
 
-Idempotent: a batch already in the table is not loaded again; COPY's load metadata
-skips files it has loaded before. Exit code 1 if a loaded batch does not reconcile
-with its manifest (row counts per symbol, duplicates); later batches wait for a human.
+Idempotent: a batch already in the table is not loaded again; COPY's load metadata skips
+files it has loaded before. Exit code 1 if a loaded batch does not reconcile with its
+manifest (row counts per symbol, duplicate keys); later batches of that dataset wait for a
+human, the other datasets still load.
 """
 
 from __future__ import annotations
@@ -16,24 +19,65 @@ import json
 import re
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 from snowflake.connector import DictCursor, SnowflakeConnection
 
+from ingestion import extract_funding, extract_klines, extract_open_interest
 from ingestion.batches import Manifest, complete_batches, is_batch_id, read_manifest
 from ingestion.clients.snowflake_conn import connect
-from ingestion.extract_klines import OUTPUT_DIR
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DDL_PATH = PROJECT_ROOT / "snowflake" / "raw_klines.sql"
-
-STAGE = "RAW.KLINES_STAGE"
-TABLE = "RAW.BINANCE_SPOT_KLINES_1H"
-FILE_FORMAT = "RAW.KLINES_JSON_FORMAT"
+DDL_PATHS = (
+    PROJECT_ROOT / "snowflake" / "raw_klines.sql",
+    PROJECT_ROOT / "snowflake" / "raw_futures.sql",
+)
 SYMBOL_PATTERN = re.compile(r"[A-Z0-9]+")
 
 PUT_OK_STATUSES = frozenset({"UPLOADED", "SKIPPED"})  # SKIPPED = same file already staged
+
+
+@dataclass(frozen=True)
+class RawDataset:
+    """What the loader needs to know about a dataset: the loading itself is the same for all."""
+
+    name: str
+    landing_dir: Path
+    stage: str
+    table: str
+    file_format: str
+    # Grid key of a row, for duplicate counts: must match the extract's check, which the
+    # manifest's `duplicates` comes from.
+    key_sql: str
+
+
+KLINES = RawDataset(
+    name="klines",
+    landing_dir=extract_klines.OUTPUT_DIR,
+    stage="RAW.KLINES_STAGE",
+    table="RAW.BINANCE_SPOT_KLINES_1H",
+    file_format="RAW.KLINES_JSON_FORMAT",
+    key_sql="payload[0]::NUMBER(38, 0)",  # open_time
+)
+FUNDING_RATE = RawDataset(
+    name="funding_rate",
+    landing_dir=extract_funding.OUTPUT_DIR,
+    stage="RAW.FUNDING_RATE_STAGE",
+    table="RAW.BINANCE_FUTURES_FUNDING_RATE",
+    file_format="RAW.JSON_ARRAY_FORMAT",
+    key_sql="FLOOR(payload:fundingTime::NUMBER(38, 0) / 3600000)",  # the hour: ms jitter
+)
+OPEN_INTEREST = RawDataset(
+    name="open_interest",
+    landing_dir=extract_open_interest.OUTPUT_DIR,
+    stage="RAW.OPEN_INTEREST_STAGE",
+    table="RAW.BINANCE_FUTURES_OPEN_INTEREST_1H",
+    file_format="RAW.JSON_ARRAY_FORMAT",
+    key_sql="payload:timestamp::NUMBER(38, 0)",
+)
+DATASETS = (KLINES, FUNDING_RATE, OPEN_INTEREST)  # loaded in this order, in one session
 
 
 class LoadError(RuntimeError):
@@ -71,25 +115,25 @@ def check_local_files(batch_dir: Path, manifest: Manifest) -> None:
             raise LoadError(f"{symbol}.json has {rows} rows, manifest says {stats['rows']}")
 
 
-def put_sql(batch_dir: Path) -> str:
+def put_sql(dataset: RawDataset, batch_dir: Path) -> str:
     """Upload every file of the batch (manifest included, for audit) to its stage directory."""
     if not is_batch_id(batch_dir.name):
         raise LoadError(f"Not a batch directory: {batch_dir}")
     # PUT accepts no bind variables; quoted file URI with forward slashes, as the connector does.
     uri = batch_dir.as_posix().replace("\\", "\\\\").replace("'", "\\'")
     return (
-        f"PUT 'file://{uri}/*' @{STAGE}/{batch_dir.name}/ "
+        f"PUT 'file://{uri}/*' @{dataset.stage}/{batch_dir.name}/ "
         "AUTO_COMPRESS = TRUE OVERWRITE = FALSE"  # a staged file is never replaced
     )
 
 
-def copy_sql(batch_id: str, symbols: Sequence[str]) -> str:
+def copy_sql(dataset: RawDataset, batch_id: str, symbols: Sequence[str]) -> str:
     """COPY exactly the manifest's files of one batch, with lineage columns from file metadata."""
     if not is_batch_id(batch_id):
         raise LoadError(f"Invalid batch id {batch_id!r}")
     files = ", ".join(f"'{check_symbol(symbol)}.json.gz'" for symbol in sorted(symbols))
     return f"""
-COPY INTO {TABLE}
+COPY INTO {dataset.table}
     (symbol, payload, _batch_id, _source_file, _file_row_number, _file_content_key, _loaded_at)
 FROM (
     SELECT
@@ -100,26 +144,29 @@ FROM (
         METADATA$FILE_ROW_NUMBER,
         METADATA$FILE_CONTENT_KEY,
         CONVERT_TIMEZONE('UTC', METADATA$START_SCAN_TIME)
-    FROM @{STAGE}/{batch_id}/
+    FROM @{dataset.stage}/{batch_id}/
 )
 FILES = ({files})
-FILE_FORMAT = (FORMAT_NAME = '{FILE_FORMAT}')
+FILE_FORMAT = (FORMAT_NAME = '{dataset.file_format}')
 ON_ERROR = ABORT_STATEMENT
 """
 
 
-BATCH_STATS_SQL = f"""
+def batch_stats_sql(dataset: RawDataset) -> str:
+    """Rows and duplicate keys per symbol of one batch (bound: the batch id)."""
+    return f"""
 SELECT
     symbol,
     COUNT(*) AS row_count,
-    COUNT(*) - COUNT(DISTINCT payload[0]::NUMBER(38, 0)) AS duplicate_count
-FROM {TABLE}
+    COUNT(*) - COUNT(DISTINCT {dataset.key_sql}) AS duplicate_count
+FROM {dataset.table}
 WHERE _batch_id = %s
 GROUP BY symbol
 """
 
 
-LOADED_BATCHES_SQL = f"SELECT DISTINCT _batch_id FROM {TABLE}"
+def loaded_batches_sql(dataset: RawDataset) -> str:
+    return f"SELECT DISTINCT _batch_id FROM {dataset.table}"
 
 
 def check_put_results(rows: list[dict[str, Any]], manifest: Manifest) -> None:
@@ -167,25 +214,27 @@ def reconcile(stats: list[dict[str, Any]], manifest: Manifest) -> list[str]:
             problems.append(f"{symbol}: {actual['row_count']} rows, manifest {expected['rows']}")
         if actual["duplicate_count"] != expected["duplicates"]:
             problems.append(
-                f"{symbol}: {actual['duplicate_count']} duplicate open_time, "
+                f"{symbol}: {actual['duplicate_count']} duplicate keys, "
                 f"manifest {expected['duplicates']}"
             )
     return problems
 
 
-def load_batch(cur: Cursor, batch_dir: Path, manifest: Manifest) -> list[str]:
+def load_batch(cur: Cursor, dataset: RawDataset, batch_dir: Path, manifest: Manifest) -> list[str]:
     """Load the batch unless it is already in the table; return reconciliation problems."""
     batch_id = manifest["batch_id"]
     check_local_files(batch_dir, manifest)
 
-    stats = query(cur, BATCH_STATS_SQL, (batch_id,))
+    stats = query(cur, batch_stats_sql(dataset), (batch_id,))
     if stats:
-        print(f"Batch {batch_id} is already in {TABLE}: skipping PUT and COPY")
+        print(f"Batch {batch_id} is already in {dataset.table}: skipping PUT and COPY")
     else:
-        check_put_results(query(cur, put_sql(batch_dir)), manifest)
-        check_copy_results(query(cur, copy_sql(batch_id, list(manifest["symbols"]))), manifest)
-        print(f"Batch {batch_id}: {len(manifest['symbols'])} files loaded into {TABLE}")
-        stats = query(cur, BATCH_STATS_SQL, (batch_id,))
+        check_put_results(query(cur, put_sql(dataset, batch_dir)), manifest)
+        check_copy_results(
+            query(cur, copy_sql(dataset, batch_id, list(manifest["symbols"]))), manifest
+        )
+        print(f"Batch {batch_id}: {len(manifest['symbols'])} files loaded into {dataset.table}")
+        stats = query(cur, batch_stats_sql(dataset), (batch_id,))
     return reconcile(stats, manifest)
 
 
@@ -202,22 +251,25 @@ def report_reconciled(manifest: Manifest) -> None:
     )
 
 
-def load_pending(cur: Cursor, root: Path) -> tuple[list[str], list[str]]:
-    """Load every pending batch, oldest first; stop at the first one that does not reconcile.
+def load_pending(cur: Cursor, dataset: RawDataset) -> tuple[list[str], list[str]]:
+    """Load every pending batch of a dataset, oldest first; stop at the first one that does
+    not reconcile.
 
     Returns the ids of the batches loaded and reconciled by this call, and the problems of
     the batch it stopped at, each prefixed with the batch id (empty = all reconciled).
     """
-    in_raw = {r["_batch_id"] for r in query(cur, LOADED_BATCHES_SQL)}
-    pending = pending_batches(root, in_raw)
+    in_raw = {r["_batch_id"] for r in query(cur, loaded_batches_sql(dataset))}
+    pending = pending_batches(dataset.landing_dir, in_raw)
     if not pending:
-        print(f"Every complete batch in {root} is in {TABLE}")
+        print(f"Every complete batch in {dataset.landing_dir} is in {dataset.table}")
         return [], []
-    print(f"Batches not in {TABLE} yet: {len(pending)} ({', '.join(d.name for d in pending)})")
+    print(
+        f"Batches not in {dataset.table} yet: {len(pending)} ({', '.join(d.name for d in pending)})"
+    )
     loaded: list[str] = []
     for batch_dir in pending:
         manifest = read_manifest(batch_dir)
-        problems = load_batch(cur, batch_dir, manifest)
+        problems = load_batch(cur, dataset, batch_dir, manifest)
         if problems:
             return loaded, [f"{batch_dir.name}: {problem}" for problem in problems]
         report_reconciled(manifest)
@@ -226,42 +278,65 @@ def load_pending(cur: Cursor, root: Path) -> tuple[list[str], list[str]]:
 
 
 def ensure_raw_objects(conn: SnowflakeConnection) -> None:
-    """Create the stage, file format and table if missing (snowflake/raw_klines.sql)."""
-    conn.execute_string(DDL_PATH.read_text(encoding="utf-8"), return_cursors=False)
+    """Create the stages, file formats and tables if missing (snowflake/raw_*.sql)."""
+    for path in DDL_PATHS:
+        conn.execute_string(path.read_text(encoding="utf-8"), return_cursors=False)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Load klines batches into Snowflake RAW.")
-    parser.add_argument(
-        "--batch", help="load only this batch id (default: every pending batch, oldest first)"
-    )
+    by_name = {d.name: d for d in DATASETS}
+    parser = argparse.ArgumentParser(description="Load extracted batches into Snowflake RAW.")
+    parser.add_argument("--dataset", choices=sorted(by_name), help="default: every dataset")
+    parser.add_argument("--batch", help="load only this batch id of --dataset")
     args = parser.parse_args(argv)
+    if args.batch and not args.dataset:
+        parser.error("--batch needs --dataset")
 
-    one = read_manifest(OUTPUT_DIR / args.batch) if args.batch else None  # fail before connecting
-    if one is None and not complete_batches(OUTPUT_DIR):
-        print(f"No complete batch in {OUTPUT_DIR}: run python -m ingestion.extract_klines first")
+    datasets = [by_name[args.dataset]] if args.dataset else list(DATASETS)
+    # Fail before connecting: a bad --batch, or nothing extracted at all.
+    one = read_manifest(datasets[0].landing_dir / args.batch) if args.batch else None
+    with_batches = [d for d in datasets if one is not None or complete_batches(d.landing_dir)]
+    for dataset in datasets:
+        if dataset not in with_batches:
+            print(f"{dataset.name}: no complete batch in {dataset.landing_dir}, skipped")
+    if not with_batches:
+        print("No complete batch to load: run the extracts first (python -m ingestion.extract_*)")
         return 1
 
-    with connect() as conn:
+    outcomes: list[str] = []
+    problems: list[str] = []
+    with connect() as conn:  # one session for every dataset: one warehouse resume
         ensure_raw_objects(conn)
         with conn.cursor(DictCursor) as cur:
-            if one is None:
-                loaded, problems = load_pending(cur, OUTPUT_DIR)
-                ok = f"loaded and reconciled {', '.join(loaded)}" if loaded else "nothing to load"
-            else:
-                problems = [
-                    f"{args.batch}: {p}" for p in load_batch(cur, OUTPUT_DIR / args.batch, one)
-                ]
-                if not problems:
-                    report_reconciled(one)
-                ok = f"batch {args.batch} reconciles with its manifest"
+            for dataset in with_batches:
+                print(f"\n== {dataset.name} ==")
+                if one is None:
+                    loaded, failed = load_pending(cur, dataset)
+                    outcome = (
+                        f"loaded and reconciled {', '.join(loaded)}"
+                        if loaded
+                        else "nothing to load"
+                    )
+                else:
+                    batch_dir = dataset.landing_dir / one["batch_id"]
+                    failed = [
+                        f"{one['batch_id']}: {p}" for p in load_batch(cur, dataset, batch_dir, one)
+                    ]
+                    if not failed:
+                        report_reconciled(one)
+                    outcome = f"batch {one['batch_id']} reconciles with its manifest"
+                if failed:
+                    problems += [f"{dataset.name}: {p}" for p in failed]
+                else:
+                    outcomes.append(f"{dataset.name} {outcome}")
 
     if problems:
-        print("\nFAIL: a batch does not reconcile with its manifest; later batches are not loaded:")
+        print("\nFAIL: a batch does not reconcile with its manifest; later batches of its")
+        print("dataset are not loaded:")
         for problem in problems:
             print(f"  {problem}")
         return 1
-    print(f"\nOK: {ok}")
+    print(f"\nOK: {'; '.join(outcomes)}")
     return 0
 
 

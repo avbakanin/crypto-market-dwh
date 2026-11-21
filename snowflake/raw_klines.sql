@@ -1,7 +1,7 @@
 -- =============================================================================
 -- crypto-market-dwh: RAW objects for Binance spot klines
 --
--- Executed by the loader at the start of every run (python -m ingestion.load_raw_klines)
+-- Executed by the loader at the start of every run (python -m ingestion.load_raw)
 -- as CRYPTO_LOADER with CRYPTO_DWH_ROLE, so the project role owns these objects.
 -- Every statement is metadata-only: running it does not resume the warehouse.
 -- Manual run in Snowsight: USE ROLE CRYPTO_DWH_ROLE; USE DATABASE CRYPTO_DWH; then
