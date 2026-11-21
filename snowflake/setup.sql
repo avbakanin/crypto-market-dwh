@@ -16,9 +16,9 @@
 --   ACCOUNT_TRIAL_MONITOR   account-wide credit cap for the whole trial
 --   CRYPTO_WH_DAILY_MONITOR daily credit cap for the project warehouse
 --   CRYPTO_DWH_ROLE         ingestion role: writes RAW only, owns the RAW objects
---   CRYPTO_TRANSFORMER      dbt role: reads RAW, owns the objects in STAGING and MARTS
+--   CRYPTO_TRANSFORMER      dbt role: reads RAW, owns the objects in STAGING, MARTS, DQ
 --   CRYPTO_WH               X-Small warehouse, suspends after 60 s idle
---   CRYPTO_DWH              database with schemas RAW, STAGING, MARTS
+--   CRYPTO_DWH              database with schemas RAW, STAGING, MARTS, DQ
 --   CRYPTO_LOADER           service user for ingestion, CRYPTO_DWH_ROLE only
 --   CRYPTO_DBT              service user for dbt, CRYPTO_TRANSFORMER only
 -- =============================================================================
@@ -75,7 +75,7 @@ ALTER ROLE CRYPTO_DWH_ROLE SET
 
 CREATE ROLE IF NOT EXISTS CRYPTO_TRANSFORMER;
 ALTER ROLE CRYPTO_TRANSFORMER SET
-    COMMENT = 'crypto-market-dwh: dbt, reads RAW, builds STAGING and MARTS';
+    COMMENT = 'crypto-market-dwh: dbt, reads RAW, builds STAGING, MARTS and DQ';
 
 -- Role hierarchy: SYSADMIN inherits the project roles, so admins can manage
 -- every object they create.
@@ -114,6 +114,8 @@ CREATE SCHEMA IF NOT EXISTS CRYPTO_DWH.STAGING
     COMMENT = 'dbt staging: typed, deduplicated, UTC';
 CREATE SCHEMA IF NOT EXISTS CRYPTO_DWH.MARTS
     COMMENT = 'dbt marts: facts and dimensions for analysis';
+CREATE SCHEMA IF NOT EXISTS CRYPTO_DWH.DQ
+    COMMENT = 'dbt data quality: failing rows of tests and the log of test results';
 
 -- GRANT is idempotent: granting an existing privilege is a no-op.
 -- USAGE alone lets a query auto-resume the warehouse; OPERATE (explicit
@@ -132,20 +134,26 @@ GRANT USAGE ON DATABASE CRYPTO_DWH TO ROLE CRYPTO_TRANSFORMER;
 GRANT USAGE, CREATE TABLE, CREATE STAGE, CREATE FILE FORMAT
     ON SCHEMA CRYPTO_DWH.RAW TO ROLE CRYPTO_DWH_ROLE;
 -- Taken back from the time one role did both jobs: the loader never creates
--- views, and STAGING and MARTS belong to dbt.
+-- views, and STAGING, MARTS and DQ belong to dbt.
 REVOKE CREATE VIEW ON SCHEMA CRYPTO_DWH.RAW FROM ROLE CRYPTO_DWH_ROLE;
 REVOKE USAGE, CREATE TABLE, CREATE VIEW
     ON SCHEMA CRYPTO_DWH.STAGING FROM ROLE CRYPTO_DWH_ROLE;
 REVOKE USAGE, CREATE TABLE, CREATE VIEW
     ON SCHEMA CRYPTO_DWH.MARTS FROM ROLE CRYPTO_DWH_ROLE;
+REVOKE USAGE, CREATE TABLE, CREATE VIEW
+    ON SCHEMA CRYPTO_DWH.DQ FROM ROLE CRYPTO_DWH_ROLE;
 
--- dbt: builds tables and views (models, seeds, tests) in STAGING and MARTS.
+-- dbt: builds tables and views (models, seeds) in STAGING and MARTS; in DQ it
+-- stores the failing rows of tests (store_failures) and appends to its log of
+-- test results (on-run-end hook).
 -- Reading RAW is granted in section 6: it needs MANAGE GRANTS.
 GRANT USAGE ON SCHEMA CRYPTO_DWH.RAW TO ROLE CRYPTO_TRANSFORMER;
 GRANT USAGE, CREATE TABLE, CREATE VIEW
     ON SCHEMA CRYPTO_DWH.STAGING TO ROLE CRYPTO_TRANSFORMER;
 GRANT USAGE, CREATE TABLE, CREATE VIEW
     ON SCHEMA CRYPTO_DWH.MARTS TO ROLE CRYPTO_TRANSFORMER;
+GRANT USAGE, CREATE TABLE, CREATE VIEW
+    ON SCHEMA CRYPTO_DWH.DQ TO ROLE CRYPTO_TRANSFORMER;
 
 
 -- -----------------------------------------------------------------------------
