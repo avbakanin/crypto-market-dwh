@@ -1,0 +1,47 @@
+version: 2
+
+# Unit tests of the intermediate SQL on hand-made rows. Inputs are models with typed
+# columns, so dict fixtures are enough (format: sql is needed only to build a VARIANT);
+# unlisted columns are NULL. Windows are shrunk through vars to keep fixtures small.
+# Prices are chosen so that returns and z-scores are exact in binary and decimal.
+
+unit_tests:
+  - name: returns_skip_holes_and_baselines_exclude_current_hour
+    description: >
+      BTCUSDT has hours 00-04 and 06 (05 missing). No return across the hole, a 4h return
+      only when the row 4 back is 4 hours back. The z-score waits for 2 returns, its
+      window (3 rows) ends before the current hour. The volume baseline needs a full window
+      of 2 rows. ETHUSDT's first row has no return although BTC rows precede it.
+    model: int_binance__hourly_returns
+    overrides:
+      vars:
+        return_zscore_window_hours: 3
+        return_zscore_min_hours: 2
+        volume_baseline_hours: 2
+    given:
+      - input: ref('stg_binance__klines_1h')
+        rows:
+          - {symbol: BTCUSDT, open_time_ms: 1735689600000, close_price: 100, quote_volume: 100}
+          - {symbol: BTCUSDT, open_time_ms: 1735693200000, close_price: 150, quote_volume: 100}
+          - {symbol: BTCUSDT, open_time_ms: 1735696800000, close_price: 75, quote_volume: 400}
+          - {symbol: BTCUSDT, open_time_ms: 1735700400000, close_price: 75, quote_volume: 100}
+          - {symbol: BTCUSDT, open_time_ms: 1735704000000, close_price: 112.5, quote_volume: 100}
+          - {symbol: BTCUSDT, open_time_ms: 1735711200000, close_price: 100, quote_volume: 100}
+          - {symbol: ETHUSDT, open_time_ms: 1735711200000, close_price: 3, quote_volume: 50}
+    expect:
+      rows:
+        - {symbol: BTCUSDT, open_time_ms: 1735689600000, return_1h: null, return_4h: null,
+           return_zscore: null, return_baseline_hours: 0, quote_volume_baseline: null}
+        - {symbol: BTCUSDT, open_time_ms: 1735693200000, return_1h: 0.5, return_4h: null,
+           return_zscore: null, return_baseline_hours: 0, quote_volume_baseline: null}
+        - {symbol: BTCUSDT, open_time_ms: 1735696800000, return_1h: -0.5, return_4h: null,
+           return_zscore: null, return_baseline_hours: 1, quote_volume_baseline: 100}
+        - {symbol: BTCUSDT, open_time_ms: 1735700400000, return_1h: 0, return_4h: null,
+           return_zscore: 0, return_baseline_hours: 2, quote_volume_baseline: 250}
+        - {symbol: BTCUSDT, open_time_ms: 1735704000000, return_1h: 0.5, return_4h: 0.125,
+           return_zscore: 1, return_baseline_hours: 3, quote_volume_baseline: 250}
+        - {symbol: BTCUSDT, open_time_ms: 1735711200000, return_1h: null, return_4h: null,
+           return_zscore: null, return_baseline_hours: 3, quote_volume_baseline: 100}
+        - {symbol: ETHUSDT, open_time_ms: 1735711200000, return_1h: null, return_4h: null,
+           return_zscore: null, return_baseline_hours: 0, quote_volume_baseline: null}
+

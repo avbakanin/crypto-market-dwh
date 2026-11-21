@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: int_binance__hourly_returns
+    description: >
+      Spot hours with 1h and 4h close-to-close returns (NULL across a hole in the grid),
+      the return z-score against the trailing 30 days and volume baselines over the
+      trailing 7 days. Baselines exclude the current hour.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [symbol, open_time_ms]
+    columns:
+      - name: symbol
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_symbol')
+                field: symbol
+      - name: open_time_ms
+        data_tests: [not_null]
+      - name: return_1h
+        description: close / previous close - 1; NULL when the previous hour is missing.
+        data_tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "> -1"
+      - name: return_zscore
+        description: >
+          (return_1h - mean) / stddev over the trailing return_zscore_window_hours,
+          NULL until return_zscore_min_hours of history.
+      - name: quote_volume_baseline
+        description: Mean quote volume of the trailing volume_baseline_hours (full window only).
+      - name: log_volume_zscore
+        description: >
+          z-score of ln(quote_volume) against the trailing volume_baseline_hours. Raw
+          volume has a heavy tail; its z-score flags ~1800 hours a year, this one ~24.
+        data_tests:
+          # Anomalous volume: a data error or a pump. Warn, read the list.
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "<= 5"
+              config:
+                severity: warn
+
