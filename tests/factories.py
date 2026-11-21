@@ -67,6 +67,23 @@ def make_contract(
     }
 
 
+def make_premium_index(symbol: str, interest_rate: str = "0.00010000") -> dict[str, Any]:
+    """One entry of /fapi/v1/premiumIndex (no symbol: a list) in the live shape.
+
+    lastFundingRate differs from interestRate on purpose: copying the wrong field fails.
+    """
+    return {
+        "symbol": symbol,
+        "markPrice": "100.00000000",
+        "indexPrice": "100.01000000",
+        "estimatedSettlePrice": "100.00500000",
+        "lastFundingRate": "0.00003810",
+        "interestRate": interest_rate,
+        "nextFundingTime": 1_735_718_400_000,
+        "time": 1_735_689_600_000,
+    }
+
+
 def make_funding(symbol: str, funding_ms: int, rate: str = "0.00010000") -> dict[str, Any]:
     """One record of /fapi/v1/fundingRate in the live shape: numbers as strings."""
     return {

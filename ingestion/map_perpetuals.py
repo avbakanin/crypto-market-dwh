@@ -7,6 +7,10 @@ Run from repo root: python -m ingestion.map_perpetuals
 A contract is matched on its baseAsset, never on a substring of its symbol: BTC must not
 match BTCDOMUSDT (a dominance index) nor PUMP match PUMPBTCUSDT. Low-priced coins are quoted
 per 1000 or per million coins (PEPE -> 1000PEPEUSDT): the multiplier is kept in the file.
+
+interest_rate_8h is the contract's base funding rate per 8 hours from premiumIndex, a
+snapshot as of mapped_at_utc (history is not served). It is not the same for every contract
+(0 for BNBUSDT), so the funding check compares each contract with its own rate.
 """
 
 from __future__ import annotations
@@ -55,17 +59,23 @@ def perpetuals_for(base: str, contracts: list[dict[str, Any]]) -> list[tuple[dic
 
 
 def map_perpetuals(
-    spot: list[tuple[str, str]], exchange_info: dict[str, Any], now: datetime
+    spot: list[tuple[str, str]],
+    exchange_info: dict[str, Any],
+    premium_index: list[dict[str, Any]],
+    now: datetime,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Rows of perpetuals.csv for the spot symbols that have a contract, and those that do not.
 
     Two contracts for one coin is ambiguous: raise, a human maps it. No contract at all is
     a coin without funding and open interest data: returned so the caller can warn.
+    A mapped contract missing from premium_index means the two snapshots disagree: raise.
     """
     if now.utcoffset() is None:
         raise ValueError("now must be timezone-aware (UTC)")
     now = now.astimezone(UTC)
 
+    # Kept as the API's string: a rate is stored exactly, never through float.
+    interest_rates = {entry["symbol"]: entry["interestRate"] for entry in premium_index}
     contracts = [c for c in exchange_info["symbols"] if is_tradable_perpetual(c)]
     rows: list[dict[str, Any]] = []
     unmapped: list[str] = []
@@ -78,11 +88,14 @@ def map_perpetuals(
             names = sorted(contract["symbol"] for contract, _ in found)
             raise ValueError(f"{symbol}: several perpetuals {names}, map it by hand")
         contract, multiplier = found[0]
+        if contract["symbol"] not in interest_rates:
+            raise ValueError(f"{symbol}: {contract['symbol']} is not in premiumIndex")
         rows.append(
             {
                 "spot_symbol": symbol,
                 "futures_symbol": contract["symbol"],
                 "contract_multiplier": multiplier,
+                "interest_rate_8h": interest_rates[contract["symbol"]],
                 "mapped_at_utc": now.isoformat(timespec="seconds"),
             }
         )
@@ -94,12 +107,15 @@ def map_perpetuals(
 def main() -> None:
     spot = load_spot_symbols()
     with BinanceFuturesClient() as client:
-        rows, unmapped = map_perpetuals(spot, client.exchange_info(), now=datetime.now(UTC))
+        rows, unmapped = map_perpetuals(
+            spot, client.exchange_info(), client.premium_index(), now=datetime.now(UTC)
+        )
     write_csv(rows, OUTPUT_PATH)
     print(f"Saved {len(rows)} of {len(spot)} symbols to {OUTPUT_PATH}:")
     for r in rows:
         note = f"  (x{r['contract_multiplier']})" if r["contract_multiplier"] != 1 else ""
-        print(f"  {r['spot_symbol']:<12} -> {r['futures_symbol']}{note}")
+        target = f"{r['futures_symbol']}{note}"
+        print(f"  {r['spot_symbol']:<12} -> {target:<22} interest {r['interest_rate_8h']}/8h")
     if unmapped:
         print(f"WARNING: no tradable USD-M perpetual, no funding/OI data: {unmapped}")
 

@@ -88,4 +88,10 @@ def test_open_interest_hist_request(client: RecordingFutures) -> None:
 def test_futures_reference_endpoints(client: RecordingFutures) -> None:
     client.exchange_info()
     client.funding_info()
-    assert client.requests == [("/fapi/v1/exchangeInfo", None), ("/fapi/v1/fundingInfo", None)]
+    client.premium_index()
+    # premiumIndex without a symbol: every contract in one request (weight 10).
+    assert client.requests == [
+        ("/fapi/v1/exchangeInfo", None),
+        ("/fapi/v1/fundingInfo", None),
+        ("/fapi/v1/premiumIndex", None),
+    ]

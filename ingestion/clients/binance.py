@@ -153,6 +153,15 @@ class BinanceFuturesClient(BinanceRestClient):
         """Contracts whose funding cap, floor or interval was adjusted; others use the defaults."""
         return self.get("/fapi/v1/fundingInfo")
 
+    def premium_index(self) -> list[dict[str, Any]]:
+        """Mark price, last funding rate and interestRate of every contract, as of now.
+
+        interestRate is the contract's base rate per 8 hours: 0.0001 for most, 0 for some
+        (BNBUSDT). While the premium stays in the clamp band a settlement pays exactly
+        interestRate * interval_hours / 8, the most frequent funding rate of a contract.
+        """
+        return self.get("/fapi/v1/premiumIndex")
+
     def funding_rate(
         self,
         symbol: str,
