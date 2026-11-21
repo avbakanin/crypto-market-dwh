@@ -9,17 +9,21 @@
 --     the single source of truth: edit it and re-run to converge.
 --   * No CREATE OR REPLACE: it is DROP + CREATE. For a resource monitor that
 --     resets used credits; for a warehouse it aborts running queries.
+--   * REVOKE succeeds even when there is nothing to revoke, so taking a
+--     privilege away is as idempotent as granting it.
 --
 -- Objects:
 --   ACCOUNT_TRIAL_MONITOR   account-wide credit cap for the whole trial
 --   CRYPTO_WH_DAILY_MONITOR daily credit cap for the project warehouse
---   CRYPTO_DWH_ROLE         project role (loader + dbt); owns tables and views
+--   CRYPTO_DWH_ROLE         ingestion role: writes RAW only, owns the RAW objects
+--   CRYPTO_TRANSFORMER      dbt role: reads RAW, owns the objects in STAGING and MARTS
 --   CRYPTO_WH               X-Small warehouse, suspends after 60 s idle
 --   CRYPTO_DWH              database with schemas RAW, STAGING, MARTS
---   CRYPTO_LOADER           service user for ingestion, project role only
+--   CRYPTO_LOADER           service user for ingestion, CRYPTO_DWH_ROLE only
+--   CRYPTO_DBT              service user for dbt, CRYPTO_TRANSFORMER only
 -- =============================================================================
 
--- The user running this script gets the project role (see section 2).
+-- The user running this script gets both project roles (see section 2).
 SET setup_user = CURRENT_USER();
 
 
@@ -60,17 +64,25 @@ ALTER RESOURCE MONITOR CRYPTO_WH_DAILY_MONITOR
 
 
 -- -----------------------------------------------------------------------------
--- 2. Project role (USERADMIN manages roles; not ACCOUNTADMIN for daily work)
+-- 2. Project roles (USERADMIN manages roles; not ACCOUNTADMIN for daily work)
 -- -----------------------------------------------------------------------------
 USE ROLE USERADMIN;
 
-CREATE ROLE IF NOT EXISTS CRYPTO_DWH_ROLE
-    COMMENT = 'crypto-market-dwh: ingestion and dbt';
+-- One role per job: the loader cannot touch dbt's schemas, dbt cannot write RAW.
+CREATE ROLE IF NOT EXISTS CRYPTO_DWH_ROLE;
+ALTER ROLE CRYPTO_DWH_ROLE SET
+    COMMENT = 'crypto-market-dwh: ingestion, writes RAW';
 
--- Role hierarchy: SYSADMIN inherits the project role, so admins can manage
--- every object the project role creates.
+CREATE ROLE IF NOT EXISTS CRYPTO_TRANSFORMER;
+ALTER ROLE CRYPTO_TRANSFORMER SET
+    COMMENT = 'crypto-market-dwh: dbt, reads RAW, builds STAGING and MARTS';
+
+-- Role hierarchy: SYSADMIN inherits the project roles, so admins can manage
+-- every object they create.
 GRANT ROLE CRYPTO_DWH_ROLE TO ROLE SYSADMIN;
+GRANT ROLE CRYPTO_TRANSFORMER TO ROLE SYSADMIN;
 GRANT ROLE CRYPTO_DWH_ROLE TO USER IDENTIFIER($setup_user);
+GRANT ROLE CRYPTO_TRANSFORMER TO USER IDENTIFIER($setup_user);
 
 
 -- -----------------------------------------------------------------------------
@@ -104,19 +116,36 @@ CREATE SCHEMA IF NOT EXISTS CRYPTO_DWH.MARTS
     COMMENT = 'dbt marts: facts and dimensions for analysis';
 
 -- GRANT is idempotent: granting an existing privilege is a no-op.
+-- USAGE alone lets a query auto-resume the warehouse; OPERATE (explicit
+-- RESUME/SUSPEND) is not needed by dbt.
 GRANT USAGE, OPERATE ON WAREHOUSE CRYPTO_WH TO ROLE CRYPTO_DWH_ROLE;
+GRANT USAGE ON WAREHOUSE CRYPTO_WH TO ROLE CRYPTO_TRANSFORMER;
 GRANT USAGE ON DATABASE CRYPTO_DWH TO ROLE CRYPTO_DWH_ROLE;
+GRANT USAGE ON DATABASE CRYPTO_DWH TO ROLE CRYPTO_TRANSFORMER;
 
--- The project role creates objects inside the schemas (and owns them),
--- but cannot drop or rename the schemas themselves. Caveat: a user's other
--- roles are active as secondary roles by default (DEFAULT_SECONDARY_ROLES =
--- ('ALL')), so least privilege holds only for a user granted this role alone.
-GRANT USAGE, CREATE TABLE, CREATE VIEW, CREATE STAGE, CREATE FILE FORMAT
+-- The project roles create objects inside the schemas (and own them), but
+-- cannot drop or rename the schemas themselves. Caveat: a user's other roles
+-- are active as secondary roles by default (DEFAULT_SECONDARY_ROLES = ('ALL')),
+-- so least privilege holds only for a user granted one role alone.
+
+-- Ingestion: the loader creates stages, file formats and tables in RAW only.
+GRANT USAGE, CREATE TABLE, CREATE STAGE, CREATE FILE FORMAT
     ON SCHEMA CRYPTO_DWH.RAW TO ROLE CRYPTO_DWH_ROLE;
+-- Taken back from the time one role did both jobs: the loader never creates
+-- views, and STAGING and MARTS belong to dbt.
+REVOKE CREATE VIEW ON SCHEMA CRYPTO_DWH.RAW FROM ROLE CRYPTO_DWH_ROLE;
+REVOKE USAGE, CREATE TABLE, CREATE VIEW
+    ON SCHEMA CRYPTO_DWH.STAGING FROM ROLE CRYPTO_DWH_ROLE;
+REVOKE USAGE, CREATE TABLE, CREATE VIEW
+    ON SCHEMA CRYPTO_DWH.MARTS FROM ROLE CRYPTO_DWH_ROLE;
+
+-- dbt: builds tables and views (models, seeds, tests) in STAGING and MARTS.
+-- Reading RAW is granted in section 6: it needs MANAGE GRANTS.
+GRANT USAGE ON SCHEMA CRYPTO_DWH.RAW TO ROLE CRYPTO_TRANSFORMER;
 GRANT USAGE, CREATE TABLE, CREATE VIEW
-    ON SCHEMA CRYPTO_DWH.STAGING TO ROLE CRYPTO_DWH_ROLE;
+    ON SCHEMA CRYPTO_DWH.STAGING TO ROLE CRYPTO_TRANSFORMER;
 GRANT USAGE, CREATE TABLE, CREATE VIEW
-    ON SCHEMA CRYPTO_DWH.MARTS TO ROLE CRYPTO_DWH_ROLE;
+    ON SCHEMA CRYPTO_DWH.MARTS TO ROLE CRYPTO_TRANSFORMER;
 
 
 -- -----------------------------------------------------------------------------
@@ -173,3 +202,42 @@ ALTER USER CRYPTO_LOADER SET
     COMMENT = 'crypto-market-dwh: ingestion (key-pair auth)';
 
 GRANT ROLE CRYPTO_DWH_ROLE TO USER CRYPTO_LOADER;
+
+
+-- -----------------------------------------------------------------------------
+-- 6. dbt reads RAW (SECURITYADMIN: grants on future objects need MANAGE GRANTS)
+-- -----------------------------------------------------------------------------
+-- The loader role owns the RAW tables and creates new ones at the start of a
+-- run (raw_*.sql). ALL covers the tables that exist now, FUTURE every table the
+-- loader creates later; neither lets dbt write, stage or load files.
+-- A schema-level future grant overrides database-level ones for this schema.
+USE ROLE SECURITYADMIN;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA CRYPTO_DWH.RAW TO ROLE CRYPTO_TRANSFORMER;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA CRYPTO_DWH.RAW TO ROLE CRYPTO_TRANSFORMER;
+
+
+-- -----------------------------------------------------------------------------
+-- 7. Service user for dbt (USERADMIN creates and owns users)
+-- -----------------------------------------------------------------------------
+-- Same pattern as CRYPTO_LOADER: key pair only, one role, no secondary roles.
+-- TIMEZONE = 'UTC': a dbt profile cannot set session parameters other than
+-- QUERY_TAG, and the account default is America/Los_Angeles; models also
+-- convert to UTC explicitly, this is the second barrier.
+-- The public key is registered separately and is not part of this script:
+--   ALTER USER CRYPTO_DBT ADD KEY PAIR <key_name> PUBLIC_KEY = '<base64>';
+USE ROLE USERADMIN;
+
+CREATE USER IF NOT EXISTS CRYPTO_DBT
+    TYPE = SERVICE
+    COMMENT = 'crypto-market-dwh: dbt (key-pair auth)';
+
+ALTER USER CRYPTO_DBT SET
+    DEFAULT_ROLE = CRYPTO_TRANSFORMER
+    DEFAULT_WAREHOUSE = CRYPTO_WH
+    DEFAULT_NAMESPACE = CRYPTO_DWH.STAGING
+    DEFAULT_SECONDARY_ROLES = ()
+    TIMEZONE = 'UTC'
+    COMMENT = 'crypto-market-dwh: dbt (key-pair auth)';
+
+GRANT ROLE CRYPTO_TRANSFORMER TO USER CRYPTO_DBT;
