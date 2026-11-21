@@ -179,7 +179,8 @@ def select_symbols(client: SymbolsSource, now: datetime) -> list[dict[str, Any]]
 def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        # LF, not csv's default CRLF: a stray carriage return sticks to the last column
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 

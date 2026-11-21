@@ -7,6 +7,7 @@ so the only rule that can drop it is the one under test.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -242,3 +243,10 @@ def test_non_utc_now_is_normalized_to_utc() -> None:
     [row] = sel.select_symbols(fake, now=same_instant_utc_plus_3)
 
     assert row["selected_at_utc"] == "2026-01-01T00:00:00+00:00"
+
+
+def test_csv_is_written_with_lf_line_endings(tmp_path: Path) -> None:
+    # Config CSVs reach Linux containers and Snowflake: 'BTCUSDT\r' != 'BTCUSDT' in a join.
+    path = tmp_path / "out.csv"
+    sel.write_csv([{"symbol": "BTCUSDT", "base_asset": "BTC"}], path)
+    assert path.read_bytes() == b"symbol,base_asset\nBTCUSDT,BTC\n"
