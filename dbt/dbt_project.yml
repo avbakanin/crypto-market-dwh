@@ -7,7 +7,9 @@ profile: crypto_market_dwh
 require-dbt-version: ">=1.12.0"
 
 model-paths: ["models"]
-seed-paths: ["seeds"]
+# The whitelist and the contract mapping are built by ingestion/ and read by Python too:
+# config/ is their single home, dbt loads them from there instead of keeping copies.
+seed-paths: ["../config"]
 test-paths: ["tests"]
 macro-paths: ["macros"]
 clean-targets: ["target", "dbt_packages"]
@@ -15,3 +17,24 @@ clean-targets: ["target", "dbt_packages"]
 flags:
   # No telemetry to dbt Labs, no .user.yml cookie next to profiles.yml.
   send_anonymous_usage_stats: false
+
+seeds:
+  crypto_market_dwh:
+    +schema: STAGING
+    # Explicit types: inference would make rates FLOAT and timestamps VARCHAR.
+    symbols:
+      +column_types:
+        symbol: varchar
+        base_asset: varchar
+        quote_asset: varchar
+        avg_quote_volume_30d_usdt: number(38, 0)
+        quote_volume_24h_usdt: number(38, 0)
+        first_candle_date: date
+        selected_at_utc: timestamp_tz
+    perpetuals:
+      +column_types:
+        spot_symbol: varchar
+        futures_symbol: varchar
+        contract_multiplier: number(38, 0)
+        interest_rate_8h: number(38, 8)
+        mapped_at_utc: timestamp_tz

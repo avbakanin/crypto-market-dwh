@@ -1,0 +1,46 @@
+version: 2
+
+sources:
+  - name: binance
+    description: >
+      RAW journals loaded by ingestion/load_raw.py: one row per record exactly as Binance
+      returned it (payload VARIANT, numbers as strings), plus COPY lineage columns.
+      Append-only: overlapping batches keep every version; STAGING picks the latest batch.
+    database: CRYPTO_DWH
+    schema: RAW
+    loader: ingestion/load_raw.py
+    config:
+      # Freshness on the data time, not the load time: a batch loaded now with old data is
+      # stale. The max is over the whole table, so this catches a pipeline that stopped, not
+      # one symbol falling behind: the hourly grid test in STAGING covers that.
+      freshness:
+        warn_after: {count: 2, period: hour}
+        error_after: {count: 26, period: hour}
+    tables:
+      - name: binance_spot_klines_1h
+        description: >
+          Spot 1h candles of the whitelisted symbols. payload is the Binance kline array:
+          [open_time, open, high, low, close, volume, close_time, quote_volume, trades,
+          taker_buy_base_volume, taker_buy_quote_volume, ignore], times in Unix ms UTC.
+        config:
+          # A candle is complete at its close: open_time + 1 h.
+          loaded_at_field: "dateadd(hour, 1, to_timestamp_tz(payload[0]::number, 3))"
+
+      - name: binance_futures_funding_rate
+        description: >
+          USD-M funding settlements per perpetual contract (symbol = contract, e.g.
+          1000PEPEUSDT). fundingTime lands 0-26 ms after the hour: the hour is the key.
+          Settles every 8 h (4 h for some contracts); markPrice is "" in old records.
+        config:
+          loaded_at_field: "to_timestamp_tz(payload:fundingTime::number, 3)"
+          freshness:
+            # The newest settlement is up to 8 h old on a healthy table.
+            warn_after: {count: 9, period: hour}
+            error_after: {count: 26, period: hour}
+
+      - name: binance_futures_open_interest_1h
+        description: >
+          Hourly open interest per perpetual contract. Binance serves only the latest ~30
+          days: past that, history missing here is lost for good, so staleness is costly.
+        config:
+          loaded_at_field: "to_timestamp_tz(payload:timestamp::number, 3)"

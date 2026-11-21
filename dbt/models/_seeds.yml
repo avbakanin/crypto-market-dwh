@@ -1,0 +1,53 @@
+version: 2
+
+seeds:
+  - name: symbols
+    description: >
+      Whitelist of spot symbols (config/symbols.csv, built by ingestion/select_symbols.py).
+      A snapshot as of selected_at_utc: volumes are the selection inputs, not facts.
+    columns:
+      - name: symbol
+        data_tests: [unique, not_null]
+      - name: base_asset
+        data_tests: [not_null]
+      - name: first_candle_date
+        data_tests: [not_null]
+      - name: selected_at_utc
+        data_tests: [not_null]
+
+  - name: perpetuals
+    description: >
+      Spot symbol -> USD-M perpetual contract (config/perpetuals.csv, built by
+      ingestion/map_perpetuals.py). A snapshot as of mapped_at_utc: Binance serves no
+      history of the multiplier or the interest rate.
+    columns:
+      - name: spot_symbol
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('symbols')
+                field: symbol
+      - name: futures_symbol
+        description: The contract as named in RAW futures tables (1000PEPEUSDT).
+        data_tests: [unique, not_null]
+      - name: contract_multiplier
+        description: Coins per contract unit; divide the contract's prices by it.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 1000, 1000000]
+                quote: false
+      - name: interest_rate_8h
+        description: >
+          Base funding rate per 8 h from premiumIndex (0.0001 for most, 0 for BNBUSDT).
+          A calm settlement pays interest_rate_8h * interval_hours / 8.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                # Binance's default is 0.0001; ten times that is a parsing error, not a rate.
+                min_value: 0
+                max_value: 0.001
