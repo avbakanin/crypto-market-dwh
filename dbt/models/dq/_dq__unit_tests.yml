@@ -1,0 +1,46 @@
+unit_tests:
+  - name: dq_checks_latest_per_check_model_and_severity
+    description: >
+      Two invocations, the second a selective run: is_latest is per check, so the check
+      the second run skipped stays latest from the first. Model rows are not checks. A
+      singular test names every model it reads; a unit test gets severity error; the
+      default 'ERROR' of generic tests becomes lower case.
+    model: dq_check_results
+    given:
+      - input: source('dq', 'dbt_node_results')
+        rows:
+          - {invocation_id: a, run_started_at: "2026-11-21 10:00:00 +00:00", resource_type: test,
+             node_unique_id: test.p.volume, node_name: volume, generic_test: dbt_utils.expression_is_true,
+             tested_node_unique_id: model.crypto_market_dwh.int_binance__hourly_returns,
+             severity: warn, status: warn, failures: 24}
+          - {invocation_id: a, run_started_at: "2026-11-21 10:00:00 +00:00", resource_type: model,
+             node_unique_id: model.crypto_market_dwh.dim_symbol, node_name: dim_symbol, status: success}
+          - {invocation_id: a, run_started_at: "2026-11-21 10:00:00 +00:00", resource_type: test,
+             node_unique_id: test.p.divergence, node_name: divergence,
+             depends_on_nodes: "model.crypto_market_dwh.stg_binance__funding_rate,model.crypto_market_dwh.stg_binance__klines_1h",
+             severity: warn, status: pass, failures: 0}
+          - {invocation_id: a, run_started_at: "2026-11-21 10:00:00 +00:00", resource_type: unit_test,
+             node_unique_id: unit_test.p.klines, node_name: klines,
+             tested_node_unique_id: model.crypto_market_dwh.stg_binance__klines_1h,
+             status: pass, failures: 0}
+          - {invocation_id: b, run_started_at: "2026-11-21 11:00:00 +00:00", resource_type: test,
+             node_unique_id: test.p.volume, node_name: volume, generic_test: dbt_utils.expression_is_true,
+             tested_node_unique_id: model.crypto_market_dwh.int_binance__hourly_returns,
+             severity: warn, status: warn, failures: 25}
+          - {invocation_id: b, run_started_at: "2026-11-21 11:00:00 +00:00", resource_type: test,
+             node_unique_id: test.p.unique, node_name: unique, generic_test: unique,
+             tested_node_unique_id: model.crypto_market_dwh.dim_symbol,
+             severity: ERROR, status: pass, failures: 0}
+    expect:
+      rows:
+        - {invocation_id: a, check_unique_id: test.p.volume, check_type: generic,
+           model_name: int_binance__hourly_returns, severity: warn, failures: 24, is_latest: false}
+        - {invocation_id: a, check_unique_id: test.p.divergence, check_type: singular,
+           model_name: "stg_binance__funding_rate, stg_binance__klines_1h", severity: warn,
+           failures: 0, is_latest: true}
+        - {invocation_id: a, check_unique_id: unit_test.p.klines, check_type: unit,
+           model_name: stg_binance__klines_1h, severity: error, failures: 0, is_latest: true}
+        - {invocation_id: b, check_unique_id: test.p.volume, check_type: generic,
+           model_name: int_binance__hourly_returns, severity: warn, failures: 25, is_latest: true}
+        - {invocation_id: b, check_unique_id: test.p.unique, check_type: generic,
+           model_name: dim_symbol, severity: error, failures: 0, is_latest: true}

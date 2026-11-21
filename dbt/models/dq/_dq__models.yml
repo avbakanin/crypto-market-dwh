@@ -1,0 +1,43 @@
+models:
+  - name: dq_check_results
+    description: >
+      Results of the data tests and unit tests per dbt invocation: the DQ report and the
+      Streamlit DQ panel read this view. Filter is_latest for the current state of each
+      check; failures_relation names the table (warn tests) or view (stop tests) in DQ
+      with the failing rows.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [invocation_id, check_unique_id]
+    columns:
+      - name: check_unique_id
+        data_tests: [not_null]
+      - name: check_type
+        description: generic, singular or unit.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [generic, singular, unit]
+      - name: model_name
+        description: >
+          The model a generic or unit test checks; for a singular test, the models it
+          reads, comma-separated.
+      - name: severity
+        description: warn or error, lower case; error for unit tests.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [warn, error]
+      - name: status
+        description: pass, warn, fail, error or skipped.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [pass, warn, fail, error, skipped]
+      - name: failures
+        description: Failing rows; equals the row count of failures_relation (tag dq_log checks it).
+      - name: logged_at
+        description: When the hook appended the row (Snowflake's clock).
+      - name: is_latest
+        description: True on the last result of each check.
+        data_tests: [not_null]

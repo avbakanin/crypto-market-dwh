@@ -40,6 +40,11 @@ models:
     marts:
       +schema: MARTS
       +materialized: table
+    # Views over the DQ log: they must see the rows the on-run-end hook appends
+    # after the models are built.
+    dq:
+      +schema: DQ
+      +materialized: view
 
 data_tests:
   crypto_market_dwh:

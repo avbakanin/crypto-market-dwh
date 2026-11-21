@@ -1,0 +1,14 @@
+selectors:
+  - name: pipeline
+    description: >
+      What a plain `dbt build` (or test, run, ls) selects: everything except the checks
+      of the DQ log (tag dq_log). They read the log the on-run-end hook writes after the
+      build, so they run as a second step: dbt test --select tag:dq_log
+    default: true
+    definition:
+      union:
+        - method: fqn
+          value: "*"
+        - exclude:
+            - method: tag
+              value: dq_log
