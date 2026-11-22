@@ -4,6 +4,8 @@ selectors:
       What a plain `dbt build` (or test, run, ls) selects: everything except the checks
       of the DQ log (tag dq_log). They read the log the on-run-end hook writes after the
       build, so they run as a second step: dbt test --select tag:dq_log
+      It matches no source: run freshness as dbt source freshness --select source:binance
+      (without --select it checks nothing and exits 0).
     default: true
     definition:
       union:
