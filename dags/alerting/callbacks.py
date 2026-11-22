@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from airflow.sdk import BaseNotifier, Context
+from airflow.sdk import BaseNotifier, Context, Variable
 
 from alerting import dbt_artifacts
 from alerting.channels import send_telegram
@@ -28,6 +28,7 @@ LOG_TAIL_LINES = 8
 # A task's output reaches its log file through the supervisor process; give it a moment.
 LOG_WAIT_ATTEMPTS = 5
 LOG_WAIT_S = 0.2
+WARNING_STATE_VARIABLE = "crypto_pipeline_dq_warnings"
 
 _OUTPUT_LOGGER = "SubprocessHook"
 _COMMAND_EXITED = "Command exited with return code"
@@ -143,5 +144,60 @@ class TelegramNotifier(BaseNotifier):
             send_telegram(text)
 
 
+class WarningDigestNotifier(BaseNotifier):
+    """After a successful build: a message when a warn-level check finds more rows than
+    in the previous build (new checks included), so steady warnings do not repeat.
+
+    The counts of the previous build live in an Airflow Variable (the metadata database)
+    and move on only after the message is sent: a lost message is retried next build.
+    """
+
+    def notify(self, context: Context) -> None:
+        ti = context["ti"]
+        artifacts = dbt_artifacts.read_fresh_artifacts(dbt_artifacts.DBT_TARGET, ti.start_date)
+        run_results = artifacts.get(dbt_artifacts.RUN_RESULTS)
+        if run_results is None:
+            self.log.warning("No run_results.json from this task: no warning digest")
+            return
+        current = dbt_artifacts.warning_counts(run_results)
+        counts = {name: failures for name, (failures, _) in current.items()}
+        previous = Variable.get(WARNING_STATE_VARIABLE, default=None, deserialize_json=True)
+        text = warning_digest_text(ti, current, previous)
+        if text is not None:
+            send_telegram(text)
+        if counts != previous:
+            Variable.set(WARNING_STATE_VARIABLE, counts, serialize_json=True)
+
+
+def warning_digest_text(
+    ti: Any,
+    current: dict[str, tuple[int, str | None]],
+    previous: dict[str, int] | None,
+) -> str | None:
+    counts = {name: failures for name, (failures, _) in current.items()}
+    if previous is None:
+        if not counts:
+            return None
+        header = f"⚠️ {ti.dag_id}: DQ warnings now (first digest, alerts on growth from here)"
+        grown, resolved = sorted(counts), []
+    else:
+        grown, resolved = dbt_artifacts.warning_changes(previous, counts)
+        if not grown:
+            return None
+        header = f"⚠️ {ti.dag_id}: DQ warnings grew"
+    lines = [header, f"run {ti.run_id}, {ti.task_id}"]
+    for name in grown:
+        failures, relation = current[name]
+        was = (previous or {}).get(name)
+        change = f"{was} -> {failures}" if was is not None else f"{failures}"
+        lines.append(f"WARN {name}: {change} rows")
+        if relation:
+            lines.append(f"  select * from {relation}")
+    for name in resolved:
+        lines.append(f"resolved: {name} (was {(previous or {})[name]})")
+    return "\n".join(lines)
+
+
 task_failure_alert = TelegramNotifier(task_failure_text)
 run_failure_alert = TelegramNotifier(run_failure_text)
+warning_digest = WarningDigestNotifier()

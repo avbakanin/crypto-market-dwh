@@ -105,3 +105,23 @@ def command_label(name: str, artifact: Artifact) -> str:
     if name == SOURCES:
         return "dbt source freshness"
     return f"dbt {artifact.get('args', {}).get('which', '?')}"
+
+
+def warning_counts(artifact: Artifact) -> dict[str, tuple[int, str | None]]:
+    """Tests that warned: name -> (failures, relation of the failing rows)."""
+    counts = {}
+    for result in artifact.get("results", []):
+        if result.get("status") == WARN_STATUS and result.get("failures") is not None:
+            name = node_name(str(result.get("unique_id", "?")))
+            counts[name] = (int(result["failures"]), result.get("relation_name"))
+    return counts
+
+
+def warning_changes(
+    previous: dict[str, int], current: dict[str, int]
+) -> tuple[list[str], list[str]]:
+    """Checks that warn more than in the previous run (new ones included), and checks
+    that stopped warning. A warning that only stays or shrinks is no news."""
+    grown = sorted(name for name, n in current.items() if n > previous.get(name, 0))
+    resolved = sorted(name for name in previous if name not in current)
+    return grown, resolved

@@ -12,7 +12,7 @@ check_environment -> extract x3 (in parallel) -> load_raw -> source_freshness ->
   The DQ log is reconciled in a second dbt call, after the hook of the build has written it.
 * Alerts (dags/alerting): a Telegram message when a task fails for good (with the failed
   dbt checks and where their rows are, or the last output of the command) or the run
-  times out.
+  times out, and when a warn-level DQ check finds more rows than in the previous build.
 
 Trigger it by hand with "Drain" (the run goes, the DAG stays paused) before unpausing it.
 """
@@ -25,7 +25,7 @@ from typing import Any
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.sdk import DAG, TriggerRule
 
-from alerting.callbacks import run_failure_alert, task_failure_alert
+from alerting.callbacks import run_failure_alert, task_failure_alert, warning_digest
 
 PROJECT_HOME = "/opt/project"
 # The project's own venv, not Airflow's: see the Dockerfile.
@@ -98,7 +98,7 @@ with DAG(
     source_freshness = project_task(
         "source_freshness", "dbt source freshness --select source:binance"
     )
-    dbt_build = project_task("dbt_build", "dbt build")
+    dbt_build = project_task("dbt_build", "dbt build", on_success_callback=warning_digest)
     dq_log = project_task("dq_log", "dbt test --select tag:dq_log")
 
     check_environment >> extracts >> load_raw >> source_freshness >> dbt_build >> dq_log

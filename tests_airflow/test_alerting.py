@@ -147,6 +147,12 @@ def test_long_summaries_are_cut_with_a_count_of_the_rest() -> None:
     assert lines[-1] == "… and 3 more"
 
 
+def test_warning_changes_report_growth_and_resolution_not_steady_or_shrinking() -> None:
+    previous = {"steady": 4, "grows": 24, "shrinks": 10, "gone": 2}
+    current = {"steady": 4, "grows": 25, "shrinks": 3, "new": 1}
+    assert dbt_artifacts.warning_changes(previous, current) == (["grows", "new"], ["gone"])
+
+
 # --- channels -------------------------------------------------------------------------
 
 
@@ -306,3 +312,77 @@ def test_run_callback_stays_silent_on_task_failures_and_reports_timeouts() -> No
         {"dag": dag, "run_id": "r", "reason": "timed_out", "ti": fake_ti()}
     )
     assert text == "❌ crypto_pipeline: run timed_out\nrun r\nlast task: dbt_build"
+
+
+class FakeVariable:
+    def __init__(self, value: Any = None) -> None:
+        self.value = value
+        self.sets = 0
+
+    def get(self, key: str, default: Any = None, deserialize_json: bool = False) -> Any:
+        assert key == callbacks.WARNING_STATE_VARIABLE and deserialize_json
+        return default if self.value is None else self.value
+
+    def set(self, key: str, value: Any, serialize_json: bool = False) -> None:
+        assert key == callbacks.WARNING_STATE_VARIABLE and serialize_json
+        self.value, self.sets = value, self.sets + 1
+
+
+@pytest.fixture()
+def sent(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    messages: list[str] = []
+    monkeypatch.setattr(callbacks, "send_telegram", messages.append)
+    return messages
+
+
+def digest(
+    target: Path, monkeypatch: pytest.MonkeyPatch, variable: FakeVariable, *results: dict
+) -> None:
+    write(target, "run_results.json", run_results(*results))
+    monkeypatch.setattr(callbacks, "Variable", variable)
+    callbacks.WarningDigestNotifier().notify({"ti": fake_ti()})
+
+
+def test_first_digest_lists_the_warnings_and_remembers_them(target, monkeypatch, sent) -> None:
+    variable = FakeVariable()
+    digest(target, monkeypatch, variable, VOLUME_WARN, FAILED_OHLC)
+    assert sent == [
+        "⚠️ crypto_pipeline: DQ warnings now (first digest, alerts on growth from here)\n"
+        "run scheduled__2026-11-22T15:07:00+00:00, dbt_build\n"
+        "WARN log_volume_zscore: 25 rows\n  select * from CRYPTO_DWH.DQ.dq_volume_anomaly"
+    ]
+    assert variable.value == {"log_volume_zscore": 25}
+
+
+def test_steady_warnings_send_nothing_and_write_nothing(target, monkeypatch, sent) -> None:
+    variable = FakeVariable({"log_volume_zscore": 25})
+    digest(target, monkeypatch, variable, VOLUME_WARN)
+    assert sent == [] and variable.sets == 0
+
+
+def test_grown_warning_is_sent_with_the_previous_count(target, monkeypatch, sent) -> None:
+    variable = FakeVariable({"log_volume_zscore": 24, "funding_gap": 4})
+    digest(target, monkeypatch, variable, VOLUME_WARN)
+    assert sent[0].splitlines()[2:] == [
+        "WARN log_volume_zscore: 24 -> 25 rows",
+        "  select * from CRYPTO_DWH.DQ.dq_volume_anomaly",
+        "resolved: funding_gap (was 4)",
+    ]
+    assert variable.value == {"log_volume_zscore": 25}
+
+
+def test_shrinking_warning_updates_the_state_quietly(target, monkeypatch, sent) -> None:
+    variable = FakeVariable({"log_volume_zscore": 30})
+    digest(target, monkeypatch, variable, VOLUME_WARN)
+    assert sent == [] and variable.value == {"log_volume_zscore": 25}
+
+
+def test_state_moves_on_only_after_the_message_is_sent(target, monkeypatch) -> None:
+    def refuse(text: str) -> None:
+        raise channels.AlertDeliveryError("Telegram is unreachable")
+
+    monkeypatch.setattr(callbacks, "send_telegram", refuse)
+    variable = FakeVariable({"log_volume_zscore": 24})
+    with pytest.raises(channels.AlertDeliveryError):
+        digest(target, monkeypatch, variable, VOLUME_WARN)
+    assert variable.value == {"log_volume_zscore": 24}

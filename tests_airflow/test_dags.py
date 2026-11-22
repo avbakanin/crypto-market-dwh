@@ -13,7 +13,7 @@ import pytest
 from airflow.dag_processing.dagbag import DagBag
 from airflow.sdk import DAG, CronTriggerTimetable, TriggerRule
 
-from alerting.callbacks import run_failure_alert, task_failure_alert
+from alerting.callbacks import run_failure_alert, task_failure_alert, warning_digest
 
 DAGS_DIR = Path(__file__).resolve().parents[1] / "dags"
 PROJECT_BIN = "/opt/project-venv/bin/"
@@ -134,6 +134,14 @@ def test_every_pipeline_task_alerts_on_its_final_failure_only(pipeline: DAG) -> 
     for task_id, task in pipeline.task_dict.items():
         assert _callbacks(task.on_failure_callback) == [task_failure_alert], task_id
         assert _callbacks(task.on_retry_callback) == [], task_id  # a retry is not news yet
+
+
+def test_the_build_sends_the_warning_digest_and_no_other_task_reports_success(
+    pipeline: DAG,
+) -> None:
+    for task_id, task in pipeline.task_dict.items():
+        expected = [warning_digest] if task_id == "dbt_build" else []
+        assert _callbacks(task.on_success_callback) == expected, task_id
 
 
 def test_the_run_reports_timeouts(pipeline: DAG) -> None:
