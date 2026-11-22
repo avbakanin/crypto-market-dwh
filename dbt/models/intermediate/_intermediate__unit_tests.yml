@@ -67,6 +67,14 @@ unit_tests:
         rows:
           - {spot_symbol: ENAUSDT, snapshot_time_ms: 1735686000000, open_interest_coins: 900}
           - {spot_symbol: ENAUSDT, snapshot_time_ms: 1735689600000, open_interest_coins: 1000}
+      - input: ref('stg_binance__long_short_ratio_1h')
+        rows:
+          - {spot_symbol: ENAUSDT, ratio_series: top_account, snapshot_time_ms: 1735686000000,
+             long_short_ratio: 2.0}
+          - {spot_symbol: ENAUSDT, ratio_series: global_account, snapshot_time_ms: 1735686000000,
+             long_short_ratio: 1.5}
+          - {spot_symbol: ENAUSDT, ratio_series: top_position, snapshot_time_ms: 1735689600000,
+             long_short_ratio: 1.2}
       - input: ref('stg_binance__funding_rate')
         rows:
           - {spot_symbol: ENAUSDT, funding_hour_ms: 1735689600000, funding_rate: 0.00005,
@@ -78,20 +86,32 @@ unit_tests:
     expect:
       rows:
         - {symbol: ENAUSDT, open_time_ms: 1735682400000, open_interest_coins: 900,
+           top_account_long_short_ratio: 2.0, top_position_long_short_ratio: null,
+           global_account_long_short_ratio: 1.5,
            funding_rate: null, funding_rate_8h: null, funding_premium_8h: null,
            hours_since_funding: null, is_funding_stale: null}
         - {symbol: ENAUSDT, open_time_ms: 1735686000000, open_interest_coins: 1000,
+           top_account_long_short_ratio: null, top_position_long_short_ratio: 1.2,
+           global_account_long_short_ratio: null,
            funding_rate: 0.00005, funding_rate_8h: 0.0001, funding_premium_8h: 0,
            hours_since_funding: 0, is_funding_stale: false}
         - {symbol: ENAUSDT, open_time_ms: 1735696800000, open_interest_coins: null,
+           top_account_long_short_ratio: null, top_position_long_short_ratio: null,
+           global_account_long_short_ratio: null,
            funding_rate: 0.00005, funding_rate_8h: 0.0001, funding_premium_8h: 0,
            hours_since_funding: 3, is_funding_stale: false}
         - {symbol: ENAUSDT, open_time_ms: 1735700400000, open_interest_coins: null,
+           top_account_long_short_ratio: null, top_position_long_short_ratio: null,
+           global_account_long_short_ratio: null,
            funding_rate: 0.00005, funding_rate_8h: 0.0001, funding_premium_8h: 0,
            hours_since_funding: 4, is_funding_stale: true}
         - {symbol: ENAUSDT, open_time_ms: 1735714800000, open_interest_coins: null,
+           top_account_long_short_ratio: null, top_position_long_short_ratio: null,
+           global_account_long_short_ratio: null,
            funding_rate: 0.0002, funding_rate_8h: 0.0004, funding_premium_8h: 0.0003,
            hours_since_funding: 0, is_funding_stale: false}
         - {symbol: BTCUSDT, open_time_ms: 1735696800000, open_interest_coins: null,
+           top_account_long_short_ratio: null, top_position_long_short_ratio: null,
+           global_account_long_short_ratio: null,
            funding_rate: 0.0001, funding_rate_8h: 0.0001, funding_premium_8h: 0,
            hours_since_funding: 11, is_funding_stale: true}

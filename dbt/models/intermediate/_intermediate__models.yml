@@ -50,7 +50,8 @@ models:
     description: >
       int_binance__hourly_returns plus the futures market at the end of each hour: open
       interest snapshot at hour_end, the last funding settlement at or before hour_end
-      (ASOF join). Open interest exists for the last ~30 days only.
+      (ASOF join), the three long/short ratios at hour_end. Open interest and the ratios
+      exist for the last ~30 days only.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -71,6 +72,14 @@ models:
                 alias: dq_market_daily_row_count
       - name: open_interest_coins
         description: Open interest in coins at hour_end; NULL outside the ~30-day history.
+      - name: top_account_long_short_ratio
+        description: >
+          Long/short accounts of the top 20% traders by margin balance at hour_end; NULL
+          outside the ~30-day history.
+      - name: top_position_long_short_ratio
+        description: Long/short position size of the same top traders at hour_end.
+      - name: global_account_long_short_ratio
+        description: Long/short accounts of all traders at hour_end.
       - name: funding_rate
         description: Rate of the last settlement at or before hour_end, per settlement.
       - name: funding_rate_8h
