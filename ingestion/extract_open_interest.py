@@ -15,7 +15,9 @@ minute after T and does not change afterwards.
 
 from __future__ import annotations
 
+import sys
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
@@ -23,6 +25,7 @@ from typing import Any, Protocol
 
 from ingestion.batches import BatchWriter, high_water_marks
 from ingestion.clients.binance import BinanceFuturesClient
+from ingestion.extract_cli import exit_code, parse_extract_args
 from ingestion.extract_funding import load_contracts
 from ingestion.extract_klines import DAY_MS, HOUR_MS
 
@@ -182,7 +185,8 @@ def extract_batch(
     return batch_dir
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_extract_args("Extract new 1h USD-M open interest.", argv)
     contracts = load_contracts()
     now_ms = int(time.time() * 1000)  # single as-of moment for the whole run
     print(
@@ -190,8 +194,9 @@ def main() -> None:
         f"as of {ms_to_utc(now_ms):%Y-%m-%d %H:%M} UTC"
     )
     with BinanceFuturesClient() as client:
-        extract_batch(client, contracts, now_ms)
+        batch_dir = extract_batch(client, contracts, now_ms)
+    return exit_code(batch_dir, args.nothing_new_exit_code)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

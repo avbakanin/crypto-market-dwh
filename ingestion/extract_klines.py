@@ -10,7 +10,9 @@ and, last, _manifest.json (see batches.py). Nothing new -> no batch.
 from __future__ import annotations
 
 import csv
+import sys
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
@@ -18,6 +20,7 @@ from typing import Any, Protocol
 
 from ingestion.batches import BatchWriter, high_water_marks
 from ingestion.clients.binance import BinanceClient
+from ingestion.extract_cli import exit_code, parse_extract_args
 
 Kline = list[Any]
 
@@ -170,7 +173,8 @@ def extract_batch(
     return batch_dir
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_extract_args("Extract new closed 1h spot klines.", argv)
     symbols = load_symbols()
     now_ms = int(time.time() * 1000)  # single as-of moment for the whole run
     print(
@@ -178,8 +182,9 @@ def main() -> None:
         f"as of {ms_to_utc(now_ms):%Y-%m-%d %H:%M} UTC"
     )
     with BinanceClient() as client:
-        extract_batch(client, symbols, now_ms)
+        batch_dir = extract_batch(client, symbols, now_ms)
+    return exit_code(batch_dir, args.nothing_new_exit_code)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
