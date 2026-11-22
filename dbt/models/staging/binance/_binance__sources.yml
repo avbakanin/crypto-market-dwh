@@ -44,3 +44,23 @@ sources:
           days: past that, history missing here is lost for good, so staleness is costly.
         config:
           loaded_at_field: "to_timestamp_tz(payload:timestamp::number, 3)"
+
+      - name: binance_futures_top_account_ratio_1h
+        description: >
+          Hourly long/short ratio of the top 20% traders by margin balance, by accounts: the
+          shares of those accounts long and short. Served ~30 days, like open interest.
+        config:
+          loaded_at_field: "to_timestamp_tz(payload:timestamp::number, 3)"
+
+      - name: binance_futures_top_position_ratio_1h
+        description: >
+          Hourly long/short ratio of the top 20% traders by margin balance, by position: the
+          shares of their position size long and short. Served ~30 days.
+        config:
+          loaded_at_field: "to_timestamp_tz(payload:timestamp::number, 3)"
+
+      - name: binance_futures_global_account_ratio_1h
+        description: >
+          Hourly long/short ratio of all traders, by accounts. Served ~30 days.
+        config:
+          loaded_at_field: "to_timestamp_tz(payload:timestamp::number, 3)"

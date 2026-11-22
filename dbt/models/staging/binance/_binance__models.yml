@@ -216,3 +216,80 @@ models:
                 severity: warn
                 store_failures_as: table
                 alias: dq_open_interest_revised_history
+
+  - name: stg_binance__long_short_ratio_1h
+    description: >
+      USD-M hourly long/short ratios of three trader populations (top accounts, top
+      positions, all accounts), one row per (contract, series, snapshot hour). RAW is the
+      only copy of this history past about 30 days.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [contract_symbol, ratio_series, snapshot_time_ms]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "date_part(epoch_millisecond, snapshot_time) = snapshot_time_ms"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "mod(snapshot_time_ms, 3600000) = 0"
+      # The shares come rounded to 4 decimals: both in [0, 1], summing to 1 within one unit.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              long_share between 0 and 1 and short_share between 0 and 1
+              and abs(long_share + short_share - 1) <= 0.0001
+      # The ratio comes from the unrounded shares: it lies within the bounds the rounding
+      # of both shares (and of the ratio) allows. A fixed tolerance fails at high ratios.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              short_share <= 0.00005 or long_short_ratio between
+              (long_share - 0.00005) / (short_share + 0.00005) - 0.00005
+              and (long_share + 0.00005) / (short_share - 0.00005) + 0.00005
+    columns:
+      - name: contract_symbol
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('perpetuals')
+                field: futures_symbol
+      - name: spot_symbol
+        data_tests: [not_null]
+      - name: ratio_series
+        description: Which population and measure, i.e. which RAW table the row comes from.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [top_account, top_position, global_account]
+      - name: snapshot_time
+        data_tests: [not_null]
+      - name: long_share
+        description: Share of the population long (accounts or position size), 4 decimals.
+        data_tests: [not_null]
+      - name: short_share
+        data_tests: [not_null]
+      - name: long_short_ratio
+        description: long_share / short_share of the unrounded shares.
+        data_tests: [not_null]
+      - name: snapshot_time_ms
+        data_tests:
+          - complete_hourly_grid:
+              arguments:
+                partition_by: "contract_symbol || ' ' || ratio_series"
+                ready_after_minutes: 5
+              config:
+                severity: warn
+                store_failures_as: table
+                alias: dq_long_short_missing_hours
+      - name: _is_revised
+        description: True when versions of the key differ, i.e. the source changed history.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [false]
+                quote: false
+              config:
+                severity: warn
+                store_failures_as: table
+                alias: dq_long_short_revised_history

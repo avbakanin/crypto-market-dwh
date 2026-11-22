@@ -145,3 +145,65 @@ unit_tests:
         - {contract_symbol: 1000PEPEUSDT, spot_symbol: PEPEUSDT, snapshot_time_ms: 1735689600000,
            open_interest: 12, open_interest_coins: 12000, open_interest_usdt: 0.204,
            _version_count: 2, _is_revised: true, _batch_id: 20261121T000000Z}
+
+  - name: long_short_series_from_the_table_and_latest_batch
+    description: >
+      The series is the RAW table a row comes from; versions are per (contract, series,
+      hour): the newest batch wins although the older one loaded later, identical versions
+      from two batches are not a revision.
+    model: stg_binance__long_short_ratio_1h
+    given:
+      - input: source('binance', 'binance_futures_top_account_ratio_1h')
+        format: sql
+        rows: |
+          select 'BTCUSDT' as symbol,
+                 parse_json('{"symbol":"BTCUSDT","longAccount":"0.7000","longShortRatio":"2.3333","shortAccount":"0.3000","timestamp":1735689600000}') as payload,
+                 '20261121T000000Z' as _batch_id, '20261121T000000Z/BTCUSDT.json.gz' as _source_file,
+                 1 as _file_row_number, 'a2' as _file_content_key,
+                 '2026-11-21 00:00:00 +0000'::timestamp_tz as _loaded_at
+          union all
+          select 'BTCUSDT',
+                 parse_json('{"symbol":"BTCUSDT","longAccount":"0.6000","longShortRatio":"1.5000","shortAccount":"0.4000","timestamp":1735689600000}'),
+                 '20261120T000000Z', '20261120T000000Z/BTCUSDT.json.gz',
+                 1, 'a1', '2026-11-22 00:00:00 +0000'::timestamp_tz
+      - input: source('binance', 'binance_futures_top_position_ratio_1h')
+        format: sql
+        rows: |
+          select '1000PEPEUSDT' as symbol,
+                 parse_json('{"symbol":"1000PEPEUSDT","longAccount":"0.5500","longShortRatio":"1.2222","shortAccount":"0.4500","timestamp":1735689600000}') as payload,
+                 '20261121T000000Z' as _batch_id, '20261121T000000Z/1000PEPEUSDT.json.gz' as _source_file,
+                 1 as _file_row_number, 'p1' as _file_content_key,
+                 '2026-11-21 00:00:00 +0000'::timestamp_tz as _loaded_at
+      - input: source('binance', 'binance_futures_global_account_ratio_1h')
+        format: sql
+        rows: |
+          select 'BTCUSDT' as symbol,
+                 parse_json('{"symbol":"BTCUSDT","longAccount":"0.8000","longShortRatio":"4.0000","shortAccount":"0.2000","timestamp":1735689600000}') as payload,
+                 '20261120T000000Z' as _batch_id, '20261120T000000Z/BTCUSDT.json.gz' as _source_file,
+                 1 as _file_row_number, 'g1' as _file_content_key,
+                 '2026-11-20 00:00:00 +0000'::timestamp_tz as _loaded_at
+          union all
+          select 'BTCUSDT',
+                 parse_json('{"symbol":"BTCUSDT","longAccount":"0.8000","longShortRatio":"4.0000","shortAccount":"0.2000","timestamp":1735689600000}'),
+                 '20261121T000000Z', '20261121T000000Z/BTCUSDT.json.gz',
+                 1, 'g2', '2026-11-21 00:00:00 +0000'::timestamp_tz
+      - input: ref('perpetuals')
+        rows:
+          - {spot_symbol: BTCUSDT, futures_symbol: BTCUSDT, contract_multiplier: 1,
+             interest_rate_8h: 0.0001, mapped_at_utc: "2026-11-21 00:00:00 +0000"}
+          - {spot_symbol: PEPEUSDT, futures_symbol: 1000PEPEUSDT, contract_multiplier: 1000,
+             interest_rate_8h: 0.0001, mapped_at_utc: "2026-11-21 00:00:00 +0000"}
+    expect:
+      rows:
+        - {contract_symbol: BTCUSDT, spot_symbol: BTCUSDT, ratio_series: top_account,
+           snapshot_time_ms: 1735689600000, long_share: 0.7, short_share: 0.3,
+           long_short_ratio: 2.3333, _version_count: 2, _is_revised: true,
+           _batch_id: 20261121T000000Z}
+        - {contract_symbol: 1000PEPEUSDT, spot_symbol: PEPEUSDT, ratio_series: top_position,
+           snapshot_time_ms: 1735689600000, long_share: 0.55, short_share: 0.45,
+           long_short_ratio: 1.2222, _version_count: 1, _is_revised: false,
+           _batch_id: 20261121T000000Z}
+        - {contract_symbol: BTCUSDT, spot_symbol: BTCUSDT, ratio_series: global_account,
+           snapshot_time_ms: 1735689600000, long_share: 0.8, short_share: 0.2,
+           long_short_ratio: 4, _version_count: 2, _is_revised: false,
+           _batch_id: 20261121T000000Z}
