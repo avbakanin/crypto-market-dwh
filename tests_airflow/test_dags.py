@@ -13,7 +13,7 @@ import pytest
 from airflow.dag_processing.dagbag import DagBag
 from airflow.sdk import DAG, CronTriggerTimetable, TriggerRule
 
-from alerting.callbacks import run_failure_alert, task_failure_alert, warning_digest
+from alerting.callbacks import heartbeat, run_failure_alert, task_failure_alert, warning_digest
 
 DAGS_DIR = Path(__file__).resolve().parents[1] / "dags"
 PROJECT_BIN = "/opt/project-venv/bin/"
@@ -144,5 +144,6 @@ def test_the_build_sends_the_warning_digest_and_no_other_task_reports_success(
         assert _callbacks(task.on_success_callback) == expected, task_id
 
 
-def test_the_run_reports_timeouts(pipeline: DAG) -> None:
+def test_the_run_reports_timeouts_and_pings_the_watchdog_on_success(pipeline: DAG) -> None:
     assert _callbacks(pipeline.on_failure_callback) == [run_failure_alert]
+    assert _callbacks(pipeline.on_success_callback) == [heartbeat]

@@ -17,7 +17,7 @@
 #
 # Alerts (dags/alerting) are sent from the scheduler (task callbacks) and the
 # DAG processor (run callbacks, callbacks of tasks ended from outside), so
-# those two get the Telegram bot.
+# those two get the Telegram bot and the watchdog URL.
 #
 # `docker compose config` prints the file with secrets filled in: run it only
 # as `docker compose config --quiet`.
@@ -63,6 +63,7 @@ x-airflow-env: &airflow-env
 x-alert-env: &alert-env
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
   TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID in .env}
+  PIPELINE_HEARTBEAT_URL: ${PIPELINE_HEARTBEAT_URL:?set PIPELINE_HEARTBEAT_URL in .env}
 
 x-airflow-common: &airflow-common
   image: crypto-market-dwh:dev

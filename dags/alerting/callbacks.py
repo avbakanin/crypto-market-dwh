@@ -6,12 +6,13 @@ Where they run (Airflow 3.4, LocalExecutor):
 * The DAG's callbacks, and the callback of a task that ended from outside (heartbeat
   timeout, killed process), run in the DAG processor: no dbt artifacts there, so every
   message must make sense without them.
-A callback that raises is only logged by Airflow: a lost alert is silent.
+A callback that raises is only logged by Airflow; the outside watchdog notices silence.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -21,7 +22,7 @@ from typing import Any
 from airflow.sdk import BaseNotifier, Context, Variable
 
 from alerting import dbt_artifacts
-from alerting.channels import send_telegram
+from alerting.channels import AlertDeliveryError, ping, send_telegram
 
 LOG_ROOT = Path("/opt/airflow/logs")
 LOG_TAIL_LINES = 8
@@ -29,6 +30,7 @@ LOG_TAIL_LINES = 8
 LOG_WAIT_ATTEMPTS = 5
 LOG_WAIT_S = 0.2
 WARNING_STATE_VARIABLE = "crypto_pipeline_dq_warnings"
+HEARTBEAT_URL_VAR = "PIPELINE_HEARTBEAT_URL"
 
 _OUTPUT_LOGGER = "SubprocessHook"
 _COMMAND_EXITED = "Command exited with return code"
@@ -198,6 +200,18 @@ def warning_digest_text(
     return "\n".join(lines)
 
 
+class HeartbeatNotifier(BaseNotifier):
+    """Pings the outside watchdog: it alerts when the pings stop (machine off, Docker
+    down, scheduler stuck, runs failing), which nothing inside the stack can notice."""
+
+    def notify(self, context: Context) -> None:
+        url = os.environ.get(HEARTBEAT_URL_VAR, "")
+        if not url:
+            raise AlertDeliveryError(f"{HEARTBEAT_URL_VAR} is not set")
+        ping(url)
+
+
 task_failure_alert = TelegramNotifier(task_failure_text)
 run_failure_alert = TelegramNotifier(run_failure_text)
 warning_digest = WarningDigestNotifier()
+heartbeat = HeartbeatNotifier()

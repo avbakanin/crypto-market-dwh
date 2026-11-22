@@ -1,4 +1,4 @@
-"""Tests of the alerting package (dags/alerting): artifacts, channel, notifiers.
+"""Tests of the alerting package (dags/alerting): artifacts, channels, notifiers.
 
 The shapes of run_results.json and sources.json follow live files of dbt 1.12.7 in the
 scheduler container; sending goes to a fake urlopen, never to Telegram.
@@ -221,6 +221,22 @@ def test_reply_without_ok_is_a_failure() -> None:
         channels.send_telegram("x", ENV, FakeOpener(reply={"ok": False}))
 
 
+def test_ping_retries_then_gives_up_without_the_url() -> None:
+    pauses: list[float] = []
+    opener = FakeOpener(error=urllib.error.URLError("down"))
+    with pytest.raises(channels.AlertDeliveryError, match="3 times") as raised:
+        channels.ping("https://hc-ping.com/secret-uuid", opener, pauses.append)
+    assert len(opener.requests) == channels.PING_ATTEMPTS
+    assert pauses == [channels.PING_PAUSE_S] * (channels.PING_ATTEMPTS - 1)
+    assert "secret-uuid" not in str(raised.value)
+
+
+def test_ping_succeeds_at_the_first_answer() -> None:
+    opener = FakeOpener()
+    channels.ping("https://hc-ping.com/uuid", opener, lambda s: None)
+    assert opener.requests == ["https://hc-ping.com/uuid"]
+
+
 # --- callbacks ------------------------------------------------------------------------
 
 
@@ -386,3 +402,14 @@ def test_state_moves_on_only_after_the_message_is_sent(target, monkeypatch) -> N
     with pytest.raises(channels.AlertDeliveryError):
         digest(target, monkeypatch, variable, VOLUME_WARN)
     assert variable.value == {"log_volume_zscore": 24}
+
+
+def test_heartbeat_pings_the_configured_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    pinged: list[str] = []
+    monkeypatch.setattr(callbacks, "ping", pinged.append)
+    monkeypatch.setenv("PIPELINE_HEARTBEAT_URL", "https://hc-ping.com/uuid")
+    callbacks.HeartbeatNotifier().notify({})
+    assert pinged == ["https://hc-ping.com/uuid"]
+    monkeypatch.setenv("PIPELINE_HEARTBEAT_URL", "")
+    with pytest.raises(channels.AlertDeliveryError, match="PIPELINE_HEARTBEAT_URL"):
+        callbacks.HeartbeatNotifier().notify({})

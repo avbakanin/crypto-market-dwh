@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -23,6 +24,8 @@ TELEGRAM_API = "https://api.telegram.org"
 # Telegram's limit is 4096 characters; leave room for how it counts some emoji.
 MAX_TEXT = 4000
 TIMEOUT_S = 10.0
+PING_ATTEMPTS = 3
+PING_PAUSE_S = 5.0
 
 Opener = Callable[..., Any]
 
@@ -74,6 +77,24 @@ def send_telegram(
         raise AlertDeliveryError(f"Telegram is unreachable: {detail}") from None
     if not reply.get("ok"):
         raise AlertDeliveryError("Telegram did not accept the message")
+
+
+def ping(
+    url: str,
+    urlopen: Opener = urllib.request.urlopen,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """GET the watchdog URL, a few attempts apart: a missed ping is a false alarm later."""
+    for attempt in range(1, PING_ATTEMPTS + 1):
+        try:
+            with urlopen(url, timeout=TIMEOUT_S):
+                return
+        except (OSError, ValueError) as error:
+            if attempt == PING_ATTEMPTS:
+                raise AlertDeliveryError(
+                    f"heartbeat ping failed {PING_ATTEMPTS} times: {type(error).__name__}"
+                ) from None
+            sleep(PING_PAUSE_S)
 
 
 def main(argv: list[str] | None = None) -> int:

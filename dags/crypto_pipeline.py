@@ -13,6 +13,7 @@ check_environment -> extract x3 (in parallel) -> load_raw -> source_freshness ->
 * Alerts (dags/alerting): a Telegram message when a task fails for good (with the failed
   dbt checks and where their rows are, or the last output of the command) or the run
   times out, and when a warn-level DQ check finds more rows than in the previous build.
+  Every successful run pings an outside watchdog, which alerts when the pings stop.
 
 Trigger it by hand with "Drain" (the run goes, the DAG stays paused) before unpausing it.
 """
@@ -25,7 +26,7 @@ from typing import Any
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.sdk import DAG, TriggerRule
 
-from alerting.callbacks import run_failure_alert, task_failure_alert, warning_digest
+from alerting.callbacks import heartbeat, run_failure_alert, task_failure_alert, warning_digest
 
 PROJECT_HOME = "/opt/project"
 # The project's own venv, not Airflow's: see the Dockerfile.
@@ -60,6 +61,7 @@ with DAG(
     tags=["pipeline"],
     doc_md=__doc__,
     on_failure_callback=run_failure_alert,  # timed out or deadlocked, not task failures
+    on_success_callback=heartbeat,  # every successful run, all-skipped ones included
     default_args={
         "retries": 0,
         "do_xcom_push": False,  # no task needs its output in the metadata database
