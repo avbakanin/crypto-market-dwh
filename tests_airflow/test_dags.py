@@ -51,7 +51,12 @@ def test_smoke_environment_has_no_schedule_and_checks_before_dbt(dagbag: DagBag)
     assert dag.task_dict["dbt_parse"].upstream_task_ids == {"check_environment"}
 
 
-PIPELINE_EXTRACTS = {"extract_klines", "extract_funding", "extract_open_interest"}
+PIPELINE_EXTRACTS = {
+    "extract_klines",
+    "extract_funding",
+    "extract_open_interest",
+    "extract_long_short",
+}
 
 
 @pytest.fixture(scope="module")

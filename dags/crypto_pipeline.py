@@ -1,13 +1,13 @@
 """The pipeline: Binance -> landing zone -> Snowflake RAW -> dbt, with its DQ checks.
 
-check_environment -> extract x3 (in parallel) -> load_raw -> source_freshness -> dbt_build -> dq_log
+check_environment -> extract x4 (in parallel) -> load_raw -> source_freshness -> dbt_build -> dq_log
 
 * The extracts work from their high-water marks, not from the run's logical date: a run
   after any downtime catches up by itself (open interest within its 30-day window), so
   there is no catchup and no backfill.
 * An extract with nothing new writes no batch and exits 99, which BashOperator reports as
   skipped. load_raw runs when at least one extract wrote a batch and none failed; when all
-  three are skipped, everything downstream is skipped too and the warehouse stays asleep.
+  four are skipped, everything downstream is skipped too and the warehouse stays asleep.
 * Failures of dbt are findings about the data, not transient errors: no retries there.
   The DQ log is reconciled in a second dbt call, after the hook of the build has written it.
 * Alerts (dags/alerting): a Telegram message when a task fails for good (with the failed
@@ -36,7 +36,7 @@ PROJECT_BIN = "/opt/project-venv/bin"
 # Every 3 hours: completeness does not depend on the cadence, the warehouse bill does.
 SCHEDULE = "7 */3 * * *"
 SKIPPED = 99  # BashOperator's default skip_on_exit_code
-EXTRACTS = ("klines", "funding", "open_interest")
+EXTRACTS = ("klines", "funding", "open_interest", "long_short")
 
 
 def project_task(task_id: str, command: str, **kwargs: Any) -> BashOperator:
