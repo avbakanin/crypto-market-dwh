@@ -9,7 +9,12 @@ from typing import Any
 
 import pytest
 
-from ingestion import extract_funding, extract_klines, extract_open_interest
+from ingestion import (
+    extract_funding,
+    extract_klines,
+    extract_long_short,
+    extract_open_interest,
+)
 from ingestion.extract_cli import parse_extract_args
 
 SKIP = 99  # what the Airflow DAG asks for; BashOperator reports it as skipped
@@ -19,6 +24,7 @@ EXTRACTS = [
     pytest.param(extract_klines, "load_symbols", "BinanceClient", id="klines"),
     pytest.param(extract_funding, "load_contracts", "BinanceFuturesClient", id="funding"),
     pytest.param(extract_open_interest, "load_contracts", "BinanceFuturesClient", id="oi"),
+    pytest.param(extract_long_short, "load_contracts", "BinanceFuturesClient", id="long_short"),
 ]
 
 

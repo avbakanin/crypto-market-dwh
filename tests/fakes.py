@@ -164,6 +164,12 @@ class FakeFutures:
         # (endpoint, symbol, start, end) of every futures_data request
         self.stats_calls: list[tuple[str, str, int | None, int | None]] = []
 
+    def __enter__(self) -> FakeFutures:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
     def funding_info(self) -> list[dict[str, Any]]:
         self.info_calls += 1
         return [

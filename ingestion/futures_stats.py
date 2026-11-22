@@ -1,11 +1,12 @@
 """Hourly statistics of USD-M perpetuals that Binance serves for about a month only.
 
 The /futures/data/ statistics endpoints share one contract, verified live on open
-interest: hourly points stamped on the hour; only about the latest month is served, and an
-older startTime or endTime is HTTP 400, so history not extracted in time is lost for good
-(RAW is the only copy); within [startTime, endTime] the API returns the LAST `limit`
-points, unlike klines and funding, so pages are explicit windows no wider than `limit`;
-point T is published about a minute after T and does not change.
+interest and the long/short ratios: hourly points stamped on the hour; only about the
+latest month is served, and an older startTime or endTime is HTTP 400, so history not
+extracted in time is lost for good (RAW is the only copy); within [startTime, endTime] the
+API returns the LAST `limit` points, unlike klines and funding, so pages are explicit
+windows no wider than `limit`; point T is published within three minutes after T and does
+not change.
 
 One algorithm, many series: a series is an endpoint plus its landing zone
 data/raw/<name>/<batch_id>/<CONTRACT>.json, with _manifest.json last (batches.py). Each
@@ -31,8 +32,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PERIOD = "1h"
 WINDOW_DAYS = 30  # served: about 31 days back; the margin keeps startTime clear of HTTP 400
 PAGE_LIMIT = 500  # the documented maximum (live, larger limits are accepted too)
-# Point T is expected only this long after T: published 61-76 s after the hour (measured
-# for open interest).
+# Point T is expected only this long after T. Measured: open interest 61-76 s (2026-11-20)
+# and 137 s, the long/short ratios 33-164 s after the hour (2026-11-22).
 PUBLISH_LAG_MS = 5 * 60 * 1000
 PAUSE_S = 0.2  # politeness pause between pages
 

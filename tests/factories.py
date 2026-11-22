@@ -119,6 +119,30 @@ def make_open_interests(symbol: str, first_ms: int, count: int) -> list[dict[str
     return [make_open_interest(symbol, first_ms + i * HOUR_MS) for i in range(count)]
 
 
+def make_long_short_ratio(
+    symbol: str, timestamp_ms: int, long_account: str = "0.6000"
+) -> dict[str, Any]:
+    """One point of a /futures/data/ long/short ratio endpoint in the live shape: shares
+    rounded to 4 decimals, numbers as strings."""
+    long_share = float(long_account)
+    return {
+        "symbol": symbol,
+        "longAccount": long_account,
+        "longShortRatio": f"{long_share / (1 - long_share):.4f}",
+        "shortAccount": f"{1 - long_share:.4f}",
+        "timestamp": timestamp_ms,
+    }
+
+
+def make_long_short_ratios(
+    symbol: str, first_ms: int, count: int, long_account: str = "0.6000"
+) -> list[dict[str, Any]]:
+    """`count` consecutive hourly points from first_ms (on the hour, as live)."""
+    return [
+        make_long_short_ratio(symbol, first_ms + i * HOUR_MS, long_account) for i in range(count)
+    ]
+
+
 def make_daily_klines(
     first_open_ms: int,
     last_open_ms: int,

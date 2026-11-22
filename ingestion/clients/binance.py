@@ -23,7 +23,14 @@ BACKOFF_BASE_S = 1.0
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
 # /futures/data/ statistics the extracts use; same parameters, same ~30-day window.
-FUTURES_DATA_ENDPOINTS = frozenset({"openInterestHist"})
+FUTURES_DATA_ENDPOINTS = frozenset(
+    {
+        "openInterestHist",
+        "topLongShortAccountRatio",
+        "topLongShortPositionRatio",
+        "globalLongShortAccountRatio",
+    }
+)
 
 
 class BinanceAPIError(RuntimeError):
@@ -145,7 +152,8 @@ class BinanceClient(BinanceRestClient):
 
 
 class BinanceFuturesClient(BinanceRestClient):
-    """USD-M futures market data endpoints (perpetual contracts: funding rate, open interest)."""
+    """USD-M futures market data endpoints (perpetual contracts: funding rate, open interest,
+    long/short ratios)."""
 
     DEFAULT_BASE_URL = FUTURES_BASE_URL
 

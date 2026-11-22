@@ -69,13 +69,20 @@ def test_funding_rate_rejects_non_positive_start_before_any_request(
     assert client.requests == []
 
 
-def test_futures_data_request(client: RecordingFutures) -> None:
-    client.futures_data(
-        "openInterestHist", "1000PEPEUSDT", "1h", start_time=START_MS, end_time=START_MS + 1
-    )
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "openInterestHist",
+        "topLongShortAccountRatio",
+        "topLongShortPositionRatio",
+        "globalLongShortAccountRatio",
+    ],
+)
+def test_futures_data_request(client: RecordingFutures, endpoint: str) -> None:
+    client.futures_data(endpoint, "1000PEPEUSDT", "1h", start_time=START_MS, end_time=START_MS + 1)
     assert client.requests == [
         (
-            "/futures/data/openInterestHist",
+            f"/futures/data/{endpoint}",
             {
                 "symbol": "1000PEPEUSDT",
                 "period": "1h",
