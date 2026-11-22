@@ -1,7 +1,8 @@
 """Load extracted batches into Snowflake RAW: PUT to the dataset's stage, COPY INTO its table.
 
 Run from repo root: python -m ingestion.load_raw [--dataset NAME] [--batch BATCH_ID]
-Default: every dataset (klines, funding_rate, open_interest) in one session, so one run
+Default: every dataset (klines, funding_rate, open_interest, the three long/short ratio
+series) in one session, so one run
 resumes the warehouse once; per dataset, every complete batch that is not in RAW yet, oldest
 first (the load watermark is the set of _batch_id values in its table). --batch loads one
 batch of one --dataset.
@@ -25,7 +26,12 @@ from typing import Any, Protocol
 
 from snowflake.connector import DictCursor, SnowflakeConnection
 
-from ingestion import extract_funding, extract_klines, extract_open_interest
+from ingestion import (
+    extract_funding,
+    extract_klines,
+    extract_long_short,
+    extract_open_interest,
+)
 from ingestion.batches import Manifest, complete_batches, is_batch_id, read_manifest
 from ingestion.clients.snowflake_conn import connect
 
@@ -77,7 +83,39 @@ OPEN_INTEREST = RawDataset(
     file_format="RAW.JSON_ARRAY_FORMAT",
     key_sql="payload:timestamp::NUMBER(38, 0)",
 )
-DATASETS = (KLINES, FUNDING_RATE, OPEN_INTEREST)  # loaded in this order, in one session
+TOP_ACCOUNT_RATIO = RawDataset(
+    name="top_account_ratio",
+    landing_dir=extract_long_short.TOP_ACCOUNT_RATIO.output_dir,
+    stage="RAW.TOP_ACCOUNT_RATIO_STAGE",
+    table="RAW.BINANCE_FUTURES_TOP_ACCOUNT_RATIO_1H",
+    file_format="RAW.JSON_ARRAY_FORMAT",
+    key_sql="payload:timestamp::NUMBER(38, 0)",
+)
+TOP_POSITION_RATIO = RawDataset(
+    name="top_position_ratio",
+    landing_dir=extract_long_short.TOP_POSITION_RATIO.output_dir,
+    stage="RAW.TOP_POSITION_RATIO_STAGE",
+    table="RAW.BINANCE_FUTURES_TOP_POSITION_RATIO_1H",
+    file_format="RAW.JSON_ARRAY_FORMAT",
+    key_sql="payload:timestamp::NUMBER(38, 0)",
+)
+GLOBAL_ACCOUNT_RATIO = RawDataset(
+    name="global_account_ratio",
+    landing_dir=extract_long_short.GLOBAL_ACCOUNT_RATIO.output_dir,
+    stage="RAW.GLOBAL_ACCOUNT_RATIO_STAGE",
+    table="RAW.BINANCE_FUTURES_GLOBAL_ACCOUNT_RATIO_1H",
+    file_format="RAW.JSON_ARRAY_FORMAT",
+    key_sql="payload:timestamp::NUMBER(38, 0)",
+)
+# Loaded in this order, in one session.
+DATASETS = (
+    KLINES,
+    FUNDING_RATE,
+    OPEN_INTEREST,
+    TOP_ACCOUNT_RATIO,
+    TOP_POSITION_RATIO,
+    GLOBAL_ACCOUNT_RATIO,
+)
 
 
 class LoadError(RuntimeError):

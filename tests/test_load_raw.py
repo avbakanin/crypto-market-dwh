@@ -18,8 +18,11 @@ from ingestion.batches import Manifest, write_manifest
 from ingestion.load_raw import (
     DATASETS,
     FUNDING_RATE,
+    GLOBAL_ACCOUNT_RATIO,
     KLINES,
     OPEN_INTEREST,
+    TOP_ACCOUNT_RATIO,
+    TOP_POSITION_RATIO,
     LoadError,
     RawDataset,
     batch_stats_sql,
@@ -152,8 +155,36 @@ def test_futures_contract_names_are_valid_symbols() -> None:
             "JSON_ARRAY_FORMAT",
             "payload:timestamp",
         ),
+        (
+            TOP_ACCOUNT_RATIO,
+            "TOP_ACCOUNT_RATIO_STAGE",
+            "BINANCE_FUTURES_TOP_ACCOUNT_RATIO_1H",
+            "JSON_ARRAY_FORMAT",
+            "payload:timestamp",
+        ),
+        (
+            TOP_POSITION_RATIO,
+            "TOP_POSITION_RATIO_STAGE",
+            "BINANCE_FUTURES_TOP_POSITION_RATIO_1H",
+            "JSON_ARRAY_FORMAT",
+            "payload:timestamp",
+        ),
+        (
+            GLOBAL_ACCOUNT_RATIO,
+            "GLOBAL_ACCOUNT_RATIO_STAGE",
+            "BINANCE_FUTURES_GLOBAL_ACCOUNT_RATIO_1H",
+            "JSON_ARRAY_FORMAT",
+            "payload:timestamp",
+        ),
     ],
-    ids=["klines", "funding_rate", "open_interest"],
+    ids=[
+        "klines",
+        "funding_rate",
+        "open_interest",
+        "top_account_ratio",
+        "top_position_ratio",
+        "global_account_ratio",
+    ],
 )
 def test_each_dataset_has_its_own_stage_table_format_and_key(
     batch_dir: Path, dataset: RawDataset, stage: str, table: str, file_format: str, key: str
@@ -169,7 +200,14 @@ def test_each_dataset_has_its_own_stage_table_format_and_key(
 
 
 def test_datasets_are_loaded_klines_first() -> None:
-    assert [d.name for d in DATASETS] == ["klines", "funding_rate", "open_interest"]
+    assert [d.name for d in DATASETS] == [
+        "klines",
+        "funding_rate",
+        "open_interest",
+        "top_account_ratio",
+        "top_position_ratio",
+        "global_account_ratio",
+    ]
 
 
 def test_landing_zones_keep_their_directories() -> None:
@@ -180,6 +218,9 @@ def test_landing_zones_keep_their_directories() -> None:
         "klines": "klines_1h",
         "funding_rate": "funding_rate",
         "open_interest": "open_interest_1h",
+        "top_account_ratio": "top_account_ratio_1h",
+        "top_position_ratio": "top_position_ratio_1h",
+        "global_account_ratio": "global_account_ratio_1h",
     }
 
 
@@ -197,8 +238,10 @@ def test_raw_objects_of_every_dataset_are_created() -> None:
 
     assert len(conn.scripts) == 2
     assert "RAW.BINANCE_SPOT_KLINES_1H" in conn.scripts[0]
-    assert "RAW.BINANCE_FUTURES_FUNDING_RATE" in conn.scripts[1]
-    assert "RAW.BINANCE_FUTURES_OPEN_INTEREST_1H" in conn.scripts[1]
+    ddl = "\n".join(conn.scripts)
+    for dataset in DATASETS:  # a new dataset without its DDL would fail at its first COPY
+        assert f"CREATE STAGE IF NOT EXISTS {dataset.stage};" in ddl
+        assert f"CREATE TABLE IF NOT EXISTS {dataset.table} (" in ddl
 
 
 # --- local pre-flight -----------------------------------------------------------------------
