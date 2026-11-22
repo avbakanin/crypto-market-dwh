@@ -172,6 +172,17 @@ def test_datasets_are_loaded_klines_first() -> None:
     assert [d.name for d in DATASETS] == ["klines", "funding_rate", "open_interest"]
 
 
+def test_landing_zones_keep_their_directories() -> None:
+    # The landing zone is the extract's watermark: a renamed directory would start the
+    # history over (a year of klines, 30 days of open interest) and orphan the old batches.
+    root = Path(load_raw.PROJECT_ROOT) / "data" / "raw"
+    assert {d.name: d.landing_dir.relative_to(root).as_posix() for d in DATASETS} == {
+        "klines": "klines_1h",
+        "funding_rate": "funding_rate",
+        "open_interest": "open_interest_1h",
+    }
+
+
 def test_raw_objects_of_every_dataset_are_created() -> None:
     class RecordingConnection:
         def __init__(self) -> None:

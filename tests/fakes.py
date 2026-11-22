@@ -134,10 +134,11 @@ class FakeFutures:
     Live semantics (verified, Week 2 Step 2): funding_rate with start_time -> the first `limit`
     records with fundingTime >= start_time (inclusive), ascending; start_time <= 0 is refused,
     as by the real client; without start_time -> the most recent `limit`. funding_info lists
-    the contracts given an interval. open_interest_hist returns the LAST `limit` points with
+    the contracts given an interval. futures_data (open interest = "openInterestHist", any
+    other /futures/data/ endpoint given in `stats`) returns the LAST `limit` points with
     start_time <= timestamp <= end_time; a start_time or end_time before `served_from` is
-    HTTP 400 -1130, as live for times older than about a month. An unknown contract raises
-    KeyError.
+    HTTP 400 -1130, as live for times older than about a month. An unknown contract or
+    endpoint raises KeyError.
     """
 
     def __init__(
@@ -146,19 +147,22 @@ class FakeFutures:
         intervals: dict[str, int] | None = None,
         open_interest: dict[str, list[dict[str, Any]]] | None = None,
         served_from: int | None = None,
+        stats: dict[str, dict[str, list[dict[str, Any]]]] | None = None,
     ) -> None:
         self._funding = {
             s: sorted(rows, key=lambda r: r["fundingTime"]) for s, rows in (funding or {}).items()
         }
         self._intervals = intervals or {}
-        self._open_interest = {
-            s: sorted(rows, key=lambda r: r["timestamp"])
-            for s, rows in (open_interest or {}).items()
+        by_endpoint = {"openInterestHist": open_interest or {}, **(stats or {})}
+        self._stats = {
+            endpoint: {s: sorted(rows, key=lambda r: r["timestamp"]) for s, rows in series.items()}
+            for endpoint, series in by_endpoint.items()
         }
         self._served_from = served_from
         self.info_calls = 0
         self.funding_calls: list[tuple[str, int | None]] = []  # (symbol, start_time)
-        self.oi_calls: list[tuple[str, int | None, int | None]] = []  # (symbol, start, end)
+        # (endpoint, symbol, start, end) of every futures_data request
+        self.stats_calls: list[tuple[str, str, int | None, int | None]] = []
 
     def funding_info(self) -> list[dict[str, Any]]:
         self.info_calls += 1
@@ -191,8 +195,9 @@ class FakeFutures:
             return rows[-limit:]
         return [r for r in rows if r["fundingTime"] >= start_time][:limit]
 
-    def open_interest_hist(
+    def futures_data(
         self,
+        endpoint: str,
         symbol: str,
         period: str,
         start_time: int | None = None,
@@ -200,13 +205,13 @@ class FakeFutures:
         limit: int = 500,
     ) -> list[dict[str, Any]]:
         if period != "1h":
-            raise ValueError(f"FakeFutures serves 1h open interest only, got {period!r}")
-        self.oi_calls.append((symbol, start_time, end_time))
+            raise ValueError(f"FakeFutures serves 1h statistics only, got {period!r}")
+        self.stats_calls.append((endpoint, symbol, start_time, end_time))
         for name, value in (("startTime", start_time), ("endTime", end_time)):
             if value is not None and self._served_from is not None and value < self._served_from:
                 body = '{"msg":"parameter ' + repr(name) + ' is invalid.","code":-1130}'
-                raise BinanceAPIError(400, "/futures/data/openInterestHist", body)
-        rows = self._open_interest[symbol]
+                raise BinanceAPIError(400, f"/futures/data/{endpoint}", body)
+        rows = self._stats[endpoint][symbol]
         if start_time is not None:
             rows = [r for r in rows if r["timestamp"] >= start_time]
         if end_time is not None:

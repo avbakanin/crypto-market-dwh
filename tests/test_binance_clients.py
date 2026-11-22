@@ -69,8 +69,10 @@ def test_funding_rate_rejects_non_positive_start_before_any_request(
     assert client.requests == []
 
 
-def test_open_interest_hist_request(client: RecordingFutures) -> None:
-    client.open_interest_hist("1000PEPEUSDT", "1h", start_time=START_MS, end_time=START_MS + 1)
+def test_futures_data_request(client: RecordingFutures) -> None:
+    client.futures_data(
+        "openInterestHist", "1000PEPEUSDT", "1h", start_time=START_MS, end_time=START_MS + 1
+    )
     assert client.requests == [
         (
             "/futures/data/openInterestHist",
@@ -83,6 +85,15 @@ def test_open_interest_hist_request(client: RecordingFutures) -> None:
             },
         )
     ]
+
+
+def test_futures_data_rejects_an_unknown_endpoint_before_any_request(
+    client: RecordingFutures,
+) -> None:
+    # A typo would be a 404 only at run time, after the retries.
+    with pytest.raises(ValueError, match="openInterestHistory"):
+        client.futures_data("openInterestHistory", "BTCUSDT", "1h")
+    assert client.requests == []
 
 
 def test_futures_reference_endpoints(client: RecordingFutures) -> None:

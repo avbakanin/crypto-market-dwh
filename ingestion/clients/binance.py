@@ -22,6 +22,9 @@ BACKOFF_BASE_S = 1.0
 # Transient: worth retrying. 418 (IP ban) is deliberately NOT here.
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
+# /futures/data/ statistics the extracts use; same parameters, same ~30-day window.
+FUTURES_DATA_ENDPOINTS = frozenset({"openInterestHist"})
+
 
 class BinanceAPIError(RuntimeError):
     """Non-retryable (or retries exhausted) HTTP error with Binance response body."""
@@ -181,22 +184,25 @@ class BinanceFuturesClient(BinanceRestClient):
             params["endTime"] = end_time
         return self.get("/fapi/v1/fundingRate", params)
 
-    def open_interest_hist(
+    def futures_data(
         self,
+        endpoint: str,
         symbol: str,
         period: str,
         start_time: int | None = None,
         end_time: int | None = None,
         limit: int = 500,
     ) -> list[dict[str, Any]]:
-        """Open interest snapshots, ascending: the LAST `limit` points with
+        """Statistics of /futures/data/<endpoint>, ascending: the LAST `limit` points with
         start_time <= timestamp <= end_time (unlike klines and funding, which return the first).
 
         Only about the latest month is served: an older start_time or end_time is HTTP 400.
         """
+        if endpoint not in FUTURES_DATA_ENDPOINTS:
+            raise ValueError(f"Unknown /futures/data/ endpoint {endpoint!r}")
         params: dict[str, Any] = {"symbol": symbol, "period": period, "limit": limit}
         if start_time is not None:
             params["startTime"] = start_time
         if end_time is not None:
             params["endTime"] = end_time
-        return self.get("/futures/data/openInterestHist", params)
+        return self.get(f"/futures/data/{endpoint}", params)
