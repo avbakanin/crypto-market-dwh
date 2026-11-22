@@ -9,6 +9,8 @@ target-version = "py312"
 # Installed dbt packages are third-party code; exclude them explicitly instead of
 # relying on .gitignore, which is absent in the Docker image.
 extend-exclude = ["dbt/dbt_packages"]
+# Airflow puts the DAGs folder on sys.path: dags/alerting imports as first-party code.
+src = [".", "dags"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]

@@ -15,6 +15,10 @@
 # `project` service get the Snowflake variables and keys; the API server, the
 # DAG processor and postgres never see them.
 #
+# Alerts (dags/alerting) are sent from the scheduler (task callbacks) and the
+# DAG processor (run callbacks, callbacks of tasks ended from outside), so
+# those two get the Telegram bot.
+#
 # `docker compose config` prints the file with secrets filled in: run it only
 # as `docker compose config --quiet`.
 
@@ -53,6 +57,12 @@ x-airflow-env: &airflow-env
   AIRFLOW__CORE__DAGS_FOLDER: /opt/project/dags
   AIRFLOW__CORE__LOAD_EXAMPLES: "false"
   AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+
+# Alert channels. `:?` as for the Airflow secrets: an empty value would turn
+# the alerts off without a word.
+x-alert-env: &alert-env
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
+  TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID in .env}
 
 x-airflow-common: &airflow-common
   image: crypto-market-dwh:dev
@@ -133,7 +143,7 @@ services:
     entrypoint: ["/usr/bin/dumb-init", "--", "with-private-keys", "/entrypoint"]
     command: ["scheduler"]
     environment:
-      <<: [*airflow-env, *project-env]
+      <<: [*airflow-env, *project-env, *alert-env]
       PROJECT_KEYS_DIR: /run/project-keys
     tmpfs:
       - /run/project-keys
@@ -161,7 +171,7 @@ services:
     <<: *airflow-common
     command: ["dag-processor"]
     environment:
-      <<: *airflow-env
+      <<: [*airflow-env, *alert-env]
     volumes:
       - airflow-logs:/opt/airflow/logs
       - ./dags:/opt/project/dags:ro

@@ -10,6 +10,9 @@ check_environment -> extract x3 (in parallel) -> load_raw -> source_freshness ->
   three are skipped, everything downstream is skipped too and the warehouse stays asleep.
 * Failures of dbt are findings about the data, not transient errors: no retries there.
   The DQ log is reconciled in a second dbt call, after the hook of the build has written it.
+* Alerts (dags/alerting): a Telegram message when a task fails for good (with the failed
+  dbt checks and where their rows are, or the last output of the command) or the run
+  times out.
 
 Trigger it by hand with "Drain" (the run goes, the DAG stays paused) before unpausing it.
 """
@@ -21,6 +24,8 @@ from typing import Any
 
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.sdk import DAG, TriggerRule
+
+from alerting.callbacks import run_failure_alert, task_failure_alert
 
 PROJECT_HOME = "/opt/project"
 # The project's own venv, not Airflow's: see the Dockerfile.
@@ -54,10 +59,13 @@ with DAG(
     is_paused_upon_creation=True,
     tags=["pipeline"],
     doc_md=__doc__,
+    on_failure_callback=run_failure_alert,  # timed out or deadlocked, not task failures
     default_args={
         "retries": 0,
         "do_xcom_push": False,  # no task needs its output in the metadata database
         "execution_timeout": timedelta(minutes=20),
+        # Only a final failure: a retry is not news yet, upstream_failed has no callback.
+        "on_failure_callback": task_failure_alert,
     },
 ):
     check_environment = project_task(
