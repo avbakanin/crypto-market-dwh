@@ -126,3 +126,37 @@ unit_tests:
         - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735725600000, offset_hours: -1, is_year_control: true, is_recent_control: true, return_since_start: 0, open_interest_change_since_start: 0}
         - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735725600000, offset_hours: 0, is_year_control: true, is_recent_control: true, return_since_start: 0.25, open_interest_change_since_start: 0}
         - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735725600000, offset_hours: 1, is_year_control: true, is_recent_control: true, return_since_start: 0, open_interest_change_since_start: 0}
+
+  - name: profile_compares_events_with_their_own_matched_controls
+    description: >
+      e1 (single coin) and e2 (multi coin) at offset 0. Volume: e1 4 against controls 1,
+      2 and 6 (median 2, mean 3), e2 6 against 1 and 1 -> median excess (2 + 5) / 2. A recent-pool control
+      (volume 100) must not enter the year comparison. Open interest: only e1 has a value,
+      so only its recent control counts; e2's recent control (0.9) is not matched, and
+      the year control's 0.5 is the wrong pool. No multi-coin open interest row.
+    model: mart_pump_profile
+    given:
+      - input: ref('fct_pump_events')
+        rows:
+          - {pump_event_id: e1, market_breadth: 1}
+          - {pump_event_id: e2, market_breadth: 3}
+      - input: ref('fct_pump_event_window')
+        rows:
+          - {pump_event_id: e1, offset_hours: 0, volume_ratio: 4, open_interest_change_since_start: 0.1}
+          - {pump_event_id: e2, offset_hours: 0, volume_ratio: 6}
+      - input: ref('fct_pump_control_window')
+        rows:
+          - {pump_event_id: e1, control_open_time_ms: 1, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 1, open_interest_change_since_start: 0.5}
+          - {pump_event_id: e1, control_open_time_ms: 2, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 2}
+          - {pump_event_id: e1, control_open_time_ms: 7, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 6}
+          - {pump_event_id: e1, control_open_time_ms: 3, offset_hours: 0, is_year_control: false, is_recent_control: true, volume_ratio: 100, open_interest_change_since_start: 0.2}
+          - {pump_event_id: e2, control_open_time_ms: 4, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 1}
+          - {pump_event_id: e2, control_open_time_ms: 5, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 1}
+          - {pump_event_id: e2, control_open_time_ms: 6, offset_hours: 0, is_year_control: false, is_recent_control: true, open_interest_change_since_start: 0.9}
+    expect:
+      rows:
+        - {event_scope: all, offset_hours: 0, metric: volume_ratio, events: 2, event_median: 5, event_p25: 4.5, event_p75: 5.5, control_hours: 5, control_median: 1, median_excess: 3.5}
+        - {event_scope: single_coin, offset_hours: 0, metric: volume_ratio, events: 1, event_median: 4, event_p25: 4, event_p75: 4, control_hours: 3, control_median: 2, median_excess: 2}
+        - {event_scope: multi_coin, offset_hours: 0, metric: volume_ratio, events: 1, event_median: 6, event_p25: 6, event_p75: 6, control_hours: 2, control_median: 1, median_excess: 5}
+        - {event_scope: all, offset_hours: 0, metric: open_interest_change_since_start, events: 1, event_median: 0.1, event_p25: 0.1, event_p75: 0.1, control_hours: 1, control_median: 0.2, median_excess: -0.1}
+        - {event_scope: single_coin, offset_hours: 0, metric: open_interest_change_since_start, events: 1, event_median: 0.1, event_p25: 0.1, event_p75: 0.1, control_hours: 1, control_median: 0.2, median_excess: -0.1}

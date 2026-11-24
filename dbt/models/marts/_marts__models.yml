@@ -155,3 +155,52 @@ models:
         data_tests: [not_null]
       - name: offset_hours
         data_tests: [not_null]
+
+  - name: mart_pump_profile
+    description: >
+      The pump profile against ordinary hours, one row per (event scope, offset, metric):
+      event median and quartiles, the median of the same events' control hours and the
+      median per-event excess over its own controls. Scopes: all, single_coin
+      (market_breadth = 1), multi_coin. The dashboard reads it.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [event_scope, offset_hours, metric]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "events >= 1 and control_hours >= 0"
+      # At the start both sides are 0 by construction.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              metric <> 'return_since_start' or offset_hours <> -1
+              or (event_median = 0 and control_median = 0 and median_excess = 0)
+    columns:
+      - name: event_scope
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [all, single_coin, multi_coin]
+      - name: offset_hours
+        data_tests: [not_null]
+      - name: metric
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - return_since_start
+                  - volume_ratio
+                  - taker_buy_share
+                  - funding_premium_8h
+                  - open_interest_change_since_start
+                  - top_account_ratio_change_since_start
+                  - top_position_ratio_change_since_start
+                  - global_account_ratio_change_since_start
+      - name: events
+        description: Events with a value of the metric at this offset.
+      - name: control_hours
+        description: Control hours of those events with a value (matched pool).
+      - name: median_excess
+        description: Median over events of (event value - median of its own controls).
