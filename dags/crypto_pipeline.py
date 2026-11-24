@@ -1,6 +1,7 @@
-"""The pipeline: Binance -> landing zone -> Snowflake RAW -> dbt, with its DQ checks.
+"""The pipeline: Binance -> landing zone -> Snowflake RAW -> dbt -> files for the dashboard.
 
-check_environment -> extract x4 (in parallel) -> load_raw -> source_freshness -> dbt_build -> dq_log
+check_environment -> extract x4 (in parallel) -> load_raw -> source_freshness -> dbt_build
+    -> dq_log -> export_marts
 
 * The extracts work from their high-water marks, not from the run's logical date: a run
   after any downtime catches up by itself (open interest within its 30-day window), so
@@ -10,6 +11,9 @@ check_environment -> extract x4 (in parallel) -> load_raw -> source_freshness ->
   four are skipped, everything downstream is skipped too and the warehouse stays asleep.
 * Failures of dbt are findings about the data, not transient errors: no retries there.
   The DQ log is reconciled in a second dbt call, after the hook of the build has written it.
+* The marts are exported to data/marts/ (Parquet, read-only service user) only after the
+  build and the reconciliation passed: the dashboard reads the last checked state, and
+  works without Snowflake.
 * Alerts (dags/alerting): a Telegram message when a task fails for good (with the failed
   dbt checks and where their rows are, or the last output of the command) or the run
   times out, and when a warn-level DQ check finds more rows than in the previous build.
@@ -102,5 +106,23 @@ with DAG(
     )
     dbt_build = project_task("dbt_build", "dbt build", on_success_callback=warning_digest)
     dq_log = project_task("dq_log", "dbt test --select tag:dq_log")
+    # Every try writes a new export directory, and an incomplete one is never read and is
+    # pruned later: one retry for a lost connection is safe. The warehouse is usually
+    # still awake from dbt.
+    export_marts = project_task(
+        "export_marts",
+        "python -m ingestion.export_marts",
+        retries=1,
+        retry_delay=timedelta(minutes=5),
+        execution_timeout=timedelta(minutes=10),
+    )
 
-    check_environment >> extracts >> load_raw >> source_freshness >> dbt_build >> dq_log
+    (
+        check_environment
+        >> extracts
+        >> load_raw
+        >> source_freshness
+        >> dbt_build
+        >> dq_log
+        >> export_marts
+    )

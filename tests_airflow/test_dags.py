@@ -80,6 +80,7 @@ def test_pipeline_order(pipeline: DAG) -> None:
         "source_freshness": {"load_raw"},
         "dbt_build": {"source_freshness"},
         "dq_log": {"dbt_build"},
+        "export_marts": {"dq_log"},
     }
 
 
@@ -111,6 +112,7 @@ def test_retries_only_where_a_retry_can_help(pipeline: DAG) -> None:
         "source_freshness": 0,
         "dbt_build": 0,
         "dq_log": 0,
+        "export_marts": 1,
     }
 
 
@@ -127,6 +129,13 @@ def test_dbt_commands(pipeline: DAG) -> None:
     assert commands["source_freshness"] == f"{PROJECT_BIN}{freshness}"
     assert commands["dbt_build"] == f"{PROJECT_BIN}dbt build"
     assert commands["dq_log"] == f"{PROJECT_BIN}dbt test --select tag:dq_log"
+
+
+def test_the_export_reads_the_marts_last_and_only_after_every_check_passed(pipeline: DAG) -> None:
+    export = pipeline.task_dict["export_marts"]
+    assert export.bash_command == f"{PROJECT_BIN}python -m ingestion.export_marts"
+    assert export.downstream_task_ids == set()
+    assert export.trigger_rule == TriggerRule.ALL_SUCCESS
 
 
 def _callbacks(value: object) -> list[object]:

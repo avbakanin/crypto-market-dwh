@@ -3,7 +3,8 @@
 Run from repo root: python -m ingestion.check_environment
 Exit code 1 on any problem. All checks are local and read nothing secret aloud:
 
-- the Snowflake variables of the loader and of dbt are set (names are printed, values never);
+- the Snowflake variables of the loader, of dbt and of the reporter (export of the marts)
+  are set (names are printed, values never);
 - each private key file exists and, on POSIX, only its owner can access it (the Snowflake
   connector refuses a key file that group or others can write; see docker/with-private-keys.sh);
 - the landing zone of every dataset exists, is writable and has complete batches.
@@ -32,9 +33,19 @@ DBT_VARS = (
     "SNOWFLAKE_DBT_PRIVATE_KEY_PATH",
     "DBT_ENV_SECRET_SNOWFLAKE_DBT_KEY_PASSPHRASE",
 )
+REPORTER_VARS = (snowflake_conn.REPORTER_KEY_PATH_VAR, snowflake_conn.REPORTER_PASSPHRASE_VAR)
 # The passphrases are required here: this project's keys are encrypted.
-REQUIRED_VARS = (*snowflake_conn.REQUIRED_VARS, snowflake_conn.PASSPHRASE_VAR, *DBT_VARS)
-KEY_PATH_VARS = ("SNOWFLAKE_PRIVATE_KEY_PATH", "SNOWFLAKE_DBT_PRIVATE_KEY_PATH")
+REQUIRED_VARS = (
+    *snowflake_conn.REQUIRED_VARS,
+    snowflake_conn.PASSPHRASE_VAR,
+    *DBT_VARS,
+    *REPORTER_VARS,
+)
+KEY_PATH_VARS = (
+    "SNOWFLAKE_PRIVATE_KEY_PATH",
+    "SNOWFLAKE_DBT_PRIVATE_KEY_PATH",
+    snowflake_conn.REPORTER_KEY_PATH_VAR,
+)
 
 
 def missing_variables(env: Mapping[str, str], names: Sequence[str]) -> list[str]:

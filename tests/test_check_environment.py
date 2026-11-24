@@ -48,13 +48,16 @@ def test_empty_variable_counts_as_missing_and_order_is_kept() -> None:
     assert ce.missing_variables({"A": "", "C": "3"}, ["C", "B", "A"]) == ["B", "A"]
 
 
-def test_required_variables_cover_loader_and_dbt() -> None:
+def test_required_variables_cover_loader_dbt_and_reporter() -> None:
     assert set(ce.REQUIRED_VARS) >= {
         "SNOWFLAKE_PRIVATE_KEY_PATH",
         "SNOWFLAKE_PRIVATE_KEY_PASSPHRASE",
         "SNOWFLAKE_DBT_PRIVATE_KEY_PATH",
         "DBT_ENV_SECRET_SNOWFLAKE_DBT_KEY_PASSPHRASE",
+        "SNOWFLAKE_REPORTER_PRIVATE_KEY_PATH",
+        "SNOWFLAKE_REPORTER_PRIVATE_KEY_PASSPHRASE",
     }
+    assert "SNOWFLAKE_REPORTER_PRIVATE_KEY_PATH" in ce.KEY_PATH_VARS
 
 
 @pytest.mark.parametrize("mode", [0o400, 0o600], ids=["read-only", "read-write"])

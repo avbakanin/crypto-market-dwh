@@ -39,6 +39,9 @@ x-project-env: &project-env
   DBT_PROFILES_DIR: /opt/project/dbt
   SNOWFLAKE_DBT_PRIVATE_KEY_PATH: /run/secrets/snowflake_dbt_key
   DBT_ENV_SECRET_SNOWFLAKE_DBT_KEY_PASSPHRASE: ${DBT_ENV_SECRET_SNOWFLAKE_DBT_KEY_PASSPHRASE:-}
+  # Export of the marts: read-only service user CRYPTO_REPORTER (ingestion/export_marts.py).
+  SNOWFLAKE_REPORTER_PRIVATE_KEY_PATH: /run/secrets/snowflake_reporter_key
+  SNOWFLAKE_REPORTER_PRIVATE_KEY_PASSPHRASE: ${SNOWFLAKE_REPORTER_PRIVATE_KEY_PASSPHRASE:-}
 
 # Airflow settings shared by every Airflow component. There is no shared
 # airflow.cfg: a container without one writes its own with a random JWT
@@ -156,6 +159,7 @@ services:
     secrets:
       - snowflake_loader_key
       - snowflake_dbt_key
+      - snowflake_reporter_key
     # Tasks report to the execution API on the API server.
     depends_on:
       <<: *airflow-depends-on
@@ -212,6 +216,7 @@ services:
     secrets:
       - snowflake_loader_key
       - snowflake_dbt_key
+      - snowflake_reporter_key
 
 volumes:
   airflow-db:
@@ -222,3 +227,5 @@ secrets:
     file: ${SNOWFLAKE_KEYS_DIR:?set SNOWFLAKE_KEYS_DIR in .env}/crypto_loader_rsa_key.p8
   snowflake_dbt_key:
     file: ${SNOWFLAKE_KEYS_DIR:?set SNOWFLAKE_KEYS_DIR in .env}/crypto_dbt_rsa_key.p8
+  snowflake_reporter_key:
+    file: ${SNOWFLAKE_KEYS_DIR:?set SNOWFLAKE_KEYS_DIR in .env}/crypto_reporter_rsa_key.p8
