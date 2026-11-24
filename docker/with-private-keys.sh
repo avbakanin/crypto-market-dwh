@@ -15,11 +15,15 @@
 set -euo pipefail
 
 keys_dir="${PROJECT_KEYS_DIR:-/tmp/project-keys}/$(id -u)"
+# Owner-only while the copies are made; the command gets the caller's umask back, or
+# everything it writes (batches, exports) would be unreadable to other users.
+previous_umask="$(umask)"
 umask 077
 mkdir -p "${keys_dir}"
 chmod 0700 "${keys_dir}"
 
-for var in SNOWFLAKE_PRIVATE_KEY_PATH SNOWFLAKE_DBT_PRIVATE_KEY_PATH \n    SNOWFLAKE_REPORTER_PRIVATE_KEY_PATH; do
+for var in SNOWFLAKE_PRIVATE_KEY_PATH SNOWFLAKE_DBT_PRIVATE_KEY_PATH \
+    SNOWFLAKE_REPORTER_PRIVATE_KEY_PATH; do
     src="${!var:-}"
     if [[ -n "${src}" && -f "${src}" ]]; then
         dst="${keys_dir}/${var,,}.p8"
@@ -30,4 +34,5 @@ for var in SNOWFLAKE_PRIVATE_KEY_PATH SNOWFLAKE_DBT_PRIVATE_KEY_PATH \n    SNOWF
     fi
 done
 
+umask "${previous_umask}"
 exec "$@"
