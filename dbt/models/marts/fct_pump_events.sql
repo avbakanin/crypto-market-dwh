@@ -166,6 +166,8 @@ select
     return_4h,
     return_zscore,
     market_breadth,
+    -- The scope rule lives here once: the profile and the dashboard read the column.
+    iff(market_breadth = 1, 'single_coin', 'multi_coin') as event_scope,
     log_volume_zscore,
     has_full_before_window,
     has_full_after_window,

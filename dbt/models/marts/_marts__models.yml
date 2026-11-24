@@ -59,6 +59,15 @@ models:
         data_tests: [not_null]
       - name: market_breadth
         description: Symbols, this one included, past the threshold in the same hour.
+      - name: event_scope
+        description: >
+          single_coin (market_breadth = 1) or multi_coin (a market move); the scopes of
+          mart_pump_profile and the dashboard's filter.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [single_coin, multi_coin]
       - name: has_full_before_window
         data_tests: [not_null]
       - name: has_full_after_window
@@ -160,8 +169,8 @@ models:
     description: >
       The pump profile against ordinary hours, one row per (event scope, offset, metric):
       event median and quartiles, the median of the same events' control hours and the
-      median per-event excess over its own controls. Scopes: all, single_coin
-      (market_breadth = 1), multi_coin. The dashboard reads it.
+      median per-event excess over its own controls. Scopes: all and the event_scope of
+      fct_pump_events (single_coin, multi_coin). The dashboard reads it.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

@@ -3,8 +3,9 @@
 -- the control hours of those same events only (matched by symbol and by data coverage).
 -- median_excess: the median over events of (event value - median of its own controls),
 -- the number the findings quote.
--- Scope: all events, single-coin (market_breadth = 1) or multi-coin (2+ symbols past the
--- threshold in the same hour, a market move rather than a coin's own pump).
+-- Scope: all events, or the event's own event_scope from fct_pump_events: single-coin
+-- (market_breadth = 1) or multi-coin (2+ symbols past the threshold in the same hour,
+-- a market move rather than a coin's own pump).
 -- Year metrics compare with the year pool, futures metrics (~30 days) with the recent pool.
 
 {%- set metrics = [
@@ -98,7 +99,7 @@ scopes as (
     union all
     select
         pump_event_id,
-        iff(market_breadth = 1, 'single_coin', 'multi_coin') as event_scope
+        event_scope
     from {{ ref('fct_pump_events') }}
 
 ),

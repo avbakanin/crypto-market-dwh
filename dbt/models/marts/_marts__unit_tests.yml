@@ -40,7 +40,7 @@ unit_tests:
     expect:
       rows:
         - {symbol: BTCUSDT, event_open_time_ms: 1735700400000, episode_hours: 1,
-           overlaps_previous_event: false, market_breadth: 1,
+           overlaps_previous_event: false, market_breadth: 1, event_scope: single_coin,
            has_full_before_window: true, has_full_after_window: true,
            has_full_open_interest_window: false,
            return_before: 0.125, return_after: 0.1,
@@ -48,7 +48,7 @@ unit_tests:
            open_interest_change_event: null,
            funding_rate_8h_before: 0.0001, funding_rate_8h_max_after: 0.0003}
         - {symbol: BTCUSDT, event_open_time_ms: 1735711200000, episode_hours: 2,
-           overlaps_previous_event: true, market_breadth: 2,
+           overlaps_previous_event: true, market_breadth: 2, event_scope: multi_coin,
            has_full_before_window: true, has_full_after_window: true,
            has_full_open_interest_window: true,
            return_before: 0.1, return_after: 0.25,
@@ -56,7 +56,7 @@ unit_tests:
            open_interest_change_event: 0.1,
            funding_rate_8h_before: 0.0003, funding_rate_8h_max_after: 0.0005}
         - {symbol: BTCUSDT, event_open_time_ms: 1735732800000, episode_hours: 1,
-           overlaps_previous_event: false, market_breadth: 1,
+           overlaps_previous_event: false, market_breadth: 1, event_scope: single_coin,
            has_full_before_window: true, has_full_after_window: false,
            has_full_open_interest_window: false,
            return_before: -0.03125, return_after: null,
@@ -64,7 +64,7 @@ unit_tests:
            open_interest_change_event: null,
            funding_rate_8h_before: 0.0001, funding_rate_8h_max_after: null}
         - {symbol: ETHUSDT, event_open_time_ms: 1735711200000, episode_hours: 1,
-           overlaps_previous_event: false, market_breadth: 2,
+           overlaps_previous_event: false, market_breadth: 2, event_scope: multi_coin,
            has_full_before_window: false, has_full_after_window: false,
            has_full_open_interest_window: false,
            return_before: null, return_after: null,
@@ -138,8 +138,8 @@ unit_tests:
     given:
       - input: ref('fct_pump_events')
         rows:
-          - {pump_event_id: e1, market_breadth: 1}
-          - {pump_event_id: e2, market_breadth: 3}
+          - {pump_event_id: e1, event_scope: single_coin}
+          - {pump_event_id: e2, event_scope: multi_coin}
       - input: ref('fct_pump_event_window')
         rows:
           - {pump_event_id: e1, offset_hours: 0, volume_ratio: 4, open_interest_change_since_start: 0.1}
