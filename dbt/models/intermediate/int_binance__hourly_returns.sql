@@ -16,6 +16,7 @@ with klines as (
         open_time_ms,
         close_price,
         quote_volume,
+        taker_buy_quote_volume,
         trade_count
     from {{ ref('stg_binance__klines_1h') }}
 
@@ -45,6 +46,7 @@ returns as (
         open_time_ms,
         close_price,
         quote_volume,
+        taker_buy_quote_volume,
         trade_count,
         iff(
             open_time_ms - previous_open_time_ms = 3600000,
@@ -105,6 +107,9 @@ select
     open_time_ms,
     close_price,
     quote_volume,
+    taker_buy_quote_volume,
+    -- Aggressive buyers' share of the hour's volume: about 0.5 normally (median 0.494).
+    taker_buy_quote_volume / nullif(quote_volume, 0) as taker_buy_share,
     trade_count,
     return_1h,
     return_4h,

@@ -26,6 +26,15 @@ models:
           - dbt_utils.expression_is_true:
               arguments:
                 expression: "> -1"
+      - name: taker_buy_share
+        description: >
+          Taker buy quote volume / quote volume: the aggressive buyers' share of the hour,
+          about 0.5 normally. Outside [0, 1] means mixed-up columns.
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "between 0 and 1"
       - name: return_zscore
         description: >
           (return_1h - mean) / stddev over the trailing return_zscore_window_hours,
