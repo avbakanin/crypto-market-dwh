@@ -4,6 +4,7 @@
 !ingestion/
 !dags/
 !dashboard/
+!analysis/
 !dbt/
 !config/
 !snowflake/
