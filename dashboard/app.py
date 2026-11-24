@@ -41,12 +41,17 @@ STATUS_LABELS = {
     "skipped": "⏭️ skipped",
 }
 
-# What the profile says per metric: the findings of the analysis (week 5, step 1).
+# What the profile says per metric: the findings (docs/findings.md, analysis/).
 NOTES = {
     "return_since_start": (
-        "**No follow-through.** The move is the pump hour itself: after it closes, the "
-        "median barely moves over 24 hours and is about as often up as down, like ordinary "
-        "hours. Buying after the signal has no edge even before costs."
+        "**The move is the pump hour itself**, after a quiet run-up: the price is about "
+        "1.6 % higher over the 6 hours before the start than ordinary hours would give. "
+        "See *Price after the pump hour* for what follows."
+    ),
+    "return_since_anchor_close": (
+        "**No follow-through.** Measured from the close of the pump hour, the median "
+        "barely moves over 24 hours and is up about as often as ordinary hours are. "
+        "Buying at the end of the pump hour has no edge even before costs."
     ),
     "volume_ratio": (
         "**The footprint before the pump.** Volume runs above its 7-day baseline for the "
@@ -67,10 +72,11 @@ NOTES = {
     ),
 }
 RATIO_NOTE = (
-    "**A hypothesis, not a finding.** Before the market rallies of November 2026 the top "
-    "traders' long/short ratio sat below its usual level: they leaned short. The events "
-    "with long/short history (since 2026-10-23) are mostly three rallies, so this is "
-    "three observations, not dozens."
+    "**A hypothesis, not a finding.** Before the pumps of November 2026 the top traders' "
+    "long/short position ratio was about 8 % higher 24 hours earlier than at the start, "
+    "while ordinary hours stayed flat: they leaned short into the rise. The events with "
+    "long/short history (since 2026-10-23) are 28 on 6 days, mostly three market "
+    "rallies: a few observations, not dozens."
 )
 
 
