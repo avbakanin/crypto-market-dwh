@@ -2,54 +2,28 @@
 -- Event side: medians and quartiles over events with a value at that offset. Control side:
 -- the control hours of those same events only (matched by symbol and by data coverage).
 -- median_excess: the median over events of (event value - median of its own controls),
--- the number the findings quote.
+-- the number the findings quote; the per-event values are fct_pump_event_excess.
 -- Scope: all events, or the event's own event_scope from fct_pump_events: single-coin
 -- (market_breadth = 1) or multi-coin (2+ symbols past the threshold in the same hour,
 -- a market move rather than a coin's own pump).
--- Year metrics compare with the year pool, futures metrics (~30 days) with the recent pool.
+-- Year metrics compare with the year pool, futures metrics (~30 days) with the recent pool
+-- (macro pump_metrics).
 
-{%- set metrics = [
-    ('return_since_start', 'year'),
-    ('volume_ratio', 'year'),
-    ('taker_buy_share', 'year'),
-    ('funding_premium_8h', 'year'),
-    ('open_interest_change_since_start', 'recent'),
-    ('top_account_ratio_change_since_start', 'recent'),
-    ('top_position_ratio_change_since_start', 'recent'),
-    ('global_account_ratio_change_since_start', 'recent'),
-] %}
+with per_event as (
 
-with event_values as (
-
-    {%- for metric, pool in metrics %}
     select
         pump_event_id,
         offset_hours,
-        '{{ metric }}' as metric,
-        {{ metric }} as value
-    from {{ ref('fct_pump_event_window') }}
-    where {{ metric }} is not null
-    {%- if not loop.last %}
-    union all
-    {%- endif %}
-    {%- endfor %}
+        metric,
+        value,
+        excess
+    from {{ ref('fct_pump_event_excess') }}
 
 ),
 
 control_values as (
 
-    {%- for metric, pool in metrics %}
-    select
-        pump_event_id,
-        offset_hours,
-        '{{ metric }}' as metric,
-        {{ metric }} as value
-    from {{ ref('fct_pump_control_window') }}
-    where is_{{ pool }}_control and {{ metric }} is not null
-    {%- if not loop.last %}
-    union all
-    {%- endif %}
-    {%- endfor %}
+    {{ pump_metric_values(ref('fct_pump_control_window'), control=true) }}
 
 ),
 
@@ -59,33 +33,11 @@ matched_controls as (
     -- history must not bring its controls into the comparison.
     select control_values.*
     from control_values
-    inner join event_values
+    inner join per_event
         on
-            control_values.pump_event_id = event_values.pump_event_id
-            and control_values.offset_hours = event_values.offset_hours
-            and control_values.metric = event_values.metric
-
-),
-
-per_event as (
-
-    select
-        event_values.pump_event_id,
-        event_values.offset_hours,
-        event_values.metric,
-        event_values.value,
-        event_values.value - median(matched_controls.value) as excess
-    from event_values
-    left join matched_controls
-        on
-            event_values.pump_event_id = matched_controls.pump_event_id
-            and event_values.offset_hours = matched_controls.offset_hours
-            and event_values.metric = matched_controls.metric
-    group by
-        event_values.pump_event_id,
-        event_values.offset_hours,
-        event_values.metric,
-        event_values.value
+            control_values.pump_event_id = per_event.pump_event_id
+            and control_values.offset_hours = per_event.offset_hours
+            and control_values.metric = per_event.metric
 
 ),
 

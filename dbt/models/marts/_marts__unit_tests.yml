@@ -129,21 +129,23 @@ unit_tests:
 
   - name: profile_compares_events_with_their_own_matched_controls
     description: >
-      e1 (single coin) and e2 (multi coin) at offset 0. Volume: e1 4 against controls 1,
-      2 and 6 (median 2, mean 3), e2 6 against 1 and 1 -> median excess (2 + 5) / 2. A recent-pool control
-      (volume 100) must not enter the year comparison. Open interest: only e1 has a value,
-      so only its recent control counts; e2's recent control (0.9) is not matched, and
-      the year control's 0.5 is the wrong pool. No multi-coin open interest row.
+      e1 (single coin) and e2 (multi coin) at offset 0, per-event values and excess from
+      fct_pump_event_excess. Volume: e1 4 against controls 1, 2 and 6 (median 2, mean 3),
+      e2 6 against 1 and 1 -> median excess (2 + 5) / 2. A recent-pool control (volume
+      100) must not enter the year comparison. Open interest: only e1 has a value, so only
+      its recent control counts; e2's recent control (0.9) is not matched, and the year
+      control's 0.5 is the wrong pool. No multi-coin open interest row.
     model: mart_pump_profile
     given:
       - input: ref('fct_pump_events')
         rows:
           - {pump_event_id: e1, event_scope: single_coin}
           - {pump_event_id: e2, event_scope: multi_coin}
-      - input: ref('fct_pump_event_window')
+      - input: ref('fct_pump_event_excess')
         rows:
-          - {pump_event_id: e1, offset_hours: 0, volume_ratio: 4, open_interest_change_since_start: 0.1}
-          - {pump_event_id: e2, offset_hours: 0, volume_ratio: 6}
+          - {pump_event_id: e1, offset_hours: 0, metric: volume_ratio, value: 4, excess: 2}
+          - {pump_event_id: e2, offset_hours: 0, metric: volume_ratio, value: 6, excess: 5}
+          - {pump_event_id: e1, offset_hours: 0, metric: open_interest_change_since_start, value: 0.1, excess: -0.1}
       - input: ref('fct_pump_control_window')
         rows:
           - {pump_event_id: e1, control_open_time_ms: 1, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 1, open_interest_change_since_start: 0.5}
@@ -160,3 +162,38 @@ unit_tests:
         - {event_scope: multi_coin, offset_hours: 0, metric: volume_ratio, events: 1, event_median: 6, event_p25: 6, event_p75: 6, control_hours: 2, control_median: 1, median_excess: 5}
         - {event_scope: all, offset_hours: 0, metric: open_interest_change_since_start, events: 1, event_median: 0.1, event_p25: 0.1, event_p75: 0.1, control_hours: 1, control_median: 0.2, median_excess: -0.1}
         - {event_scope: single_coin, offset_hours: 0, metric: open_interest_change_since_start, events: 1, event_median: 0.1, event_p25: 0.1, event_p75: 0.1, control_hours: 1, control_median: 0.2, median_excess: -0.1}
+
+  - name: event_excess_against_the_event_own_pool_and_offset
+    description: >
+      Offset 0. e1 volume 4 against its year controls 1, 2, 6 (median 2); the recent-only
+      control (100) and a control at offset 1 (50) must not count. e1 open interest 0.1
+      against its recent controls 0.2 and -0.3 (the year control's 0.5 is the wrong pool):
+      median -0.05, half above and half below zero. e1 funding premium -0.0001 against
+      -0.0002, 0, 0.0001, 0.0003: a control at exactly 0 is neither above nor below.
+      e2 has no open interest value, so its recent control makes no row; its taker share
+      has no control value at all: the row stays, with NULL median and excess.
+    model: fct_pump_event_excess
+    given:
+      - input: ref('fct_pump_event_window')
+        rows:
+          - {pump_event_id: e1, offset_hours: 0, volume_ratio: 4, open_interest_change_since_start: 0.1, funding_premium_8h: -0.0001}
+          - {pump_event_id: e2, offset_hours: 0, volume_ratio: 6, taker_buy_share: 0.6}
+      - input: ref('fct_pump_control_window')
+        rows:
+          - {pump_event_id: e1, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 1, open_interest_change_since_start: 0.5, funding_premium_8h: -0.0002}
+          - {pump_event_id: e1, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 2, funding_premium_8h: 0}
+          - {pump_event_id: e1, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 6, funding_premium_8h: 0.0001}
+          - {pump_event_id: e1, offset_hours: 0, is_year_control: true, is_recent_control: false, funding_premium_8h: 0.0003}
+          - {pump_event_id: e1, offset_hours: 0, is_year_control: false, is_recent_control: true, volume_ratio: 100, open_interest_change_since_start: 0.2, funding_premium_8h: -0.5}
+          - {pump_event_id: e1, offset_hours: 0, is_year_control: false, is_recent_control: true, open_interest_change_since_start: -0.3}
+          - {pump_event_id: e1, offset_hours: 1, is_year_control: true, is_recent_control: false, volume_ratio: 50}
+          - {pump_event_id: e2, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 1}
+          - {pump_event_id: e2, offset_hours: 0, is_year_control: true, is_recent_control: false, volume_ratio: 1}
+          - {pump_event_id: e2, offset_hours: 0, is_year_control: false, is_recent_control: true, open_interest_change_since_start: 0.9}
+    expect:
+      rows:
+        - {pump_event_id: e1, offset_hours: 0, metric: volume_ratio, value: 4, control_hours: 3, control_median: 2, control_share_above_zero: 1, control_share_below_zero: 0, excess: 2}
+        - {pump_event_id: e1, offset_hours: 0, metric: open_interest_change_since_start, value: 0.1, control_hours: 2, control_median: -0.05, control_share_above_zero: 0.5, control_share_below_zero: 0.5, excess: 0.15}
+        - {pump_event_id: e1, offset_hours: 0, metric: funding_premium_8h, value: -0.0001, control_hours: 4, control_median: 0.00005, control_share_above_zero: 0.5, control_share_below_zero: 0.25, excess: -0.00015}
+        - {pump_event_id: e2, offset_hours: 0, metric: volume_ratio, value: 6, control_hours: 2, control_median: 1, control_share_above_zero: 1, control_share_below_zero: 0, excess: 5}
+        - {pump_event_id: e2, offset_hours: 0, metric: taker_buy_share, value: 0.6, control_hours: 0, control_median: null, control_share_above_zero: null, control_share_below_zero: null, excess: null}

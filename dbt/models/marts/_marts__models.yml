@@ -213,3 +213,57 @@ models:
         description: Control hours of those events with a value (matched pool).
       - name: median_excess
         description: Median over events of (event value - median of its own controls).
+
+  - name: fct_pump_event_excess
+    description: >
+      Each pump event against its own ordinary hours, one row per (event, offset, metric)
+      with a value: the event's value, the median and the shares above / below zero of its
+      control hours (the metric's pool in fct_pump_control_window, same offset) and
+      excess = value - control median. The per-event numbers behind mart_pump_profile;
+      exported so that the analysis can resample event days for confidence intervals.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [pump_event_id, offset_hours, metric]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              control_hours between 0 and {{ var('control_hours_per_event') }}
+              and (control_hours = 0) = (excess is null)
+              and control_share_above_zero + control_share_below_zero <= 1
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              metric <> 'return_since_start' or offset_hours <> -1
+              or (value = 0 and excess = 0)
+    columns:
+      - name: pump_event_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_pump_events')
+                field: pump_event_id
+      - name: offset_hours
+        data_tests: [not_null]
+      - name: metric
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - return_since_start
+                  - volume_ratio
+                  - taker_buy_share
+                  - funding_premium_8h
+                  - open_interest_change_since_start
+                  - top_account_ratio_change_since_start
+                  - top_position_ratio_change_since_start
+                  - global_account_ratio_change_since_start
+      - name: value
+        data_tests: [not_null]
+      - name: control_hours
+        description: The event's control hours with a value of the metric at this offset.
+        data_tests: [not_null]
+      - name: excess
+        description: value - control_median; NULL when the event has no control value.
