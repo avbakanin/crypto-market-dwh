@@ -66,6 +66,18 @@ EXPORTS = (
         "CRYPTO_DWH.MARTS.MART_PUMP_PROFILE",
         "event_scope, metric, offset_hours",
     ),
+    # Per-event numbers of the profile and the next-hour check: the analysis resamples
+    # event days from them (analysis/pump_findings.py).
+    MartExport(
+        "fct_pump_event_excess",
+        "CRYPTO_DWH.MARTS.FCT_PUMP_EVENT_EXCESS",
+        "pump_event_id, metric, offset_hours",
+    ),
+    MartExport(
+        "mart_pump_signal_check",
+        "CRYPTO_DWH.MARTS.MART_PUMP_SIGNAL_CHECK",
+        "rule, signal_date",
+    ),
     MartExport(
         "dq_check_results",
         "CRYPTO_DWH.DQ.DQ_CHECK_RESULTS",

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 import statistics
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -128,12 +129,18 @@ def is_export_id(name: str) -> bool:
     return EXPORT_ID.fullmatch(name) is not None
 
 
-def latest_snapshot(root: Path) -> Snapshot | None:
+Contract = Mapping[str, frozenset[str]]  # table -> the columns a reader needs
+
+
+def latest_snapshot(
+    root: Path, required: Contract = REQUIRED_COLUMNS, optional: Contract = OPTIONAL_COLUMNS
+) -> Snapshot | None:
     """The newest complete export under root, or None if there is none yet.
 
     Complete: named like an export and holding the manifest. The newest complete one is
     read even when it is broken, and a newer export this process may not read is an error
-    too: SnapshotError, rather than older data that would look current.
+    too: SnapshotError, rather than older data that would look current. The contract is
+    the dashboard's unless a reader passes its own (analysis/pump_findings.py).
     """
     if not root.is_dir():
         return None
@@ -142,7 +149,7 @@ def latest_snapshot(root: Path) -> Snapshot | None:
     )
     for directory in exports:
         if has_manifest(directory):
-            return read_snapshot(directory)
+            return read_snapshot(directory, required, optional)
     return None
 
 
@@ -159,8 +166,11 @@ def has_manifest(directory: Path) -> bool:
     return True
 
 
-def read_snapshot(directory: Path) -> Snapshot:
-    """Check an export's manifest against what the dashboard reads."""
+def read_snapshot(
+    directory: Path, required: Contract = REQUIRED_COLUMNS, optional: Contract = OPTIONAL_COLUMNS
+) -> Snapshot:
+    """Check an export's manifest against what a reader needs: the required tables must
+    be there, an optional table only when listed; each with its columns and its file."""
     name = directory.name
     try:
         manifest = json.loads((directory / MANIFEST_NAME).read_text(encoding="utf-8"))
@@ -176,10 +186,10 @@ def read_snapshot(directory: Path) -> Snapshot:
     if exported_at.utcoffset() is None:
         raise SnapshotError(f"Export {name}: exported_at_utc has no time zone")
 
-    missing = [table for table in REQUIRED_COLUMNS if table not in listed]
+    missing = [table for table in required if table not in listed]
     if missing:
         raise SnapshotError(f"Export {name}: no table {', '.join(missing)}")
-    wanted = REQUIRED_COLUMNS | {t: c for t, c in OPTIONAL_COLUMNS.items() if t in listed}
+    wanted = {**required, **{t: c for t, c in optional.items() if t in listed}}
     rows: dict[str, int] = {}
     for table, columns in wanted.items():
         entry = listed[table]
@@ -202,7 +212,7 @@ def open_snapshot(snapshot: Snapshot) -> duckdb.DuckDBPyConnection:
     con = duckdb.connect(":memory:")
     try:
         con.execute("SET TimeZone = 'UTC'")
-        for table in snapshot.tables:  # fixed names from REQUIRED/OPTIONAL_COLUMNS
+        for table in snapshot.tables:  # names from a reader's contract, checked by the manifest
             path = snapshot.directory / f"{table}.parquet"
             try:
                 con.read_parquet(str(path)).create(table)

@@ -123,13 +123,15 @@ def test_a_lossy_cast_fails_instead_of_rounding() -> None:
 # --- queries and the session ------------------------------------------------------------
 
 
-def test_exported_files_are_the_ones_the_dashboard_reads() -> None:
-    """Independent literals: renaming a file breaks the dashboard."""
+def test_exported_files_are_the_ones_the_readers_expect() -> None:
+    """Independent literals: renaming a file breaks the dashboard or the analysis."""
     assert [export.name for export in EXPORTS] == [
         "dim_symbol",
         "fct_pump_events",
         "fct_pump_event_window",
         "mart_pump_profile",
+        "fct_pump_event_excess",
+        "mart_pump_signal_check",
         "dq_check_results",
         "dq_data_coverage",
     ]

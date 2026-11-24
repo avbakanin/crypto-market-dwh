@@ -141,6 +141,16 @@ def test_export_without_coverage_is_read_without_it(tmp_path: Path) -> None:
         assert len(data.pump_events(con, PumpFilter())) == 4
 
 
+def test_tables_of_other_readers_are_not_loaded(tmp_path: Path) -> None:
+    """The analysis tables are in the export too; the dashboard reads its own contract."""
+    rows = make_mart_rows()
+    rows["mart_pump_signal_check"] = []
+    write_mart_export(tmp_path, rows=rows)
+    snapshot = data.latest_snapshot(tmp_path)
+    assert snapshot is not None
+    assert "mart_pump_signal_check" not in snapshot.tables
+
+
 def test_coverage_without_its_columns_is_rejected(tmp_path: Path) -> None:
     export_dir = write_mart_export(tmp_path)
     edit_manifest(export_dir, lambda m: m["tables"]["dq_data_coverage"]["columns"].pop("data_to"))
@@ -162,22 +172,20 @@ def test_export_time_is_normalized_to_utc(tmp_path: Path) -> None:
     assert snapshot.exported_at.utcoffset() == timedelta(0)
 
 
-def test_dashboard_reads_the_files_the_export_writes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The contract between ingestion/export_marts.py and the dashboard: directory name,
-    manifest keys, file names. The fake cursor's tables have columns id, n, x, ts, flag."""
+def test_dashboard_reads_the_files_the_export_writes(tmp_path: Path) -> None:
+    """The contract between ingestion/export_marts.py and the export readers: directory
+    name, manifest keys, file names. The fake cursor's tables have columns id, n, x, ts,
+    flag, so the contract here asks for two of them in every exported table."""
     from tests.test_export_marts import mart_results
 
     names = [export.name for export in export_marts.EXPORTS]
-    assert names == [*data.REQUIRED_COLUMNS, *data.OPTIONAL_COLUMNS]
-    monkeypatch.setattr(data, "REQUIRED_COLUMNS", {n: frozenset({"id", "ts"}) for n in names})
-    monkeypatch.setattr(data, "OPTIONAL_COLUMNS", {})
+    assert {*data.REQUIRED_COLUMNS, *data.OPTIONAL_COLUMNS} <= set(names)
+    every_table = {n: frozenset({"id", "ts"}) for n in names}
     as_of = datetime(2026, 11, 24, 12, 7, 30, tzinfo=UTC)
     export_dir = tmp_path / "20261124T120730Z"
     export_marts.write_export(FakeArrowCursor(mart_results()), export_dir, as_of)
 
-    snapshot = data.latest_snapshot(tmp_path)
+    snapshot = data.latest_snapshot(tmp_path, required=every_table, optional={})
     assert snapshot is not None
     assert (snapshot.export_id, snapshot.exported_at) == ("20261124T120730Z", as_of)
     assert snapshot.tables == tuple(names)

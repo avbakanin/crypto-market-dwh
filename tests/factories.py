@@ -262,6 +262,29 @@ MART_SCHEMAS: dict[str, pa.Schema] = {
         ]
         + _decimals("event_median", "event_p25", "event_p75", "control_median", "median_excess")
     ),
+    "fct_pump_event_excess": pa.schema(
+        [
+            ("pump_event_id", pa.string()),
+            ("offset_hours", pa.int64()),
+            ("metric", pa.string()),
+            ("control_hours", pa.int64()),
+        ]
+        + _decimals(
+            "value",
+            "control_median",
+            "control_share_above_zero",
+            "control_share_below_zero",
+            "excess",
+        )
+    ),
+    "mart_pump_signal_check": pa.schema(
+        [
+            ("rule", pa.string()),
+            ("signal_date", pa.date32()),
+            ("signal_hours", pa.int64()),
+            ("followed_by_pump", pa.int64()),
+        ]
+    ),
     "dq_check_results": pa.schema(
         [
             ("invocation_id", pa.string()),
