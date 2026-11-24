@@ -197,3 +197,38 @@ unit_tests:
         - {pump_event_id: e1, offset_hours: 0, metric: funding_premium_8h, value: -0.0001, control_hours: 4, control_median: 0.00005, control_share_above_zero: 0.5, control_share_below_zero: 0.25, excess: -0.00015}
         - {pump_event_id: e2, offset_hours: 0, metric: volume_ratio, value: 6, control_hours: 2, control_median: 1, control_share_above_zero: 1, control_share_below_zero: 0, excess: 5}
         - {pump_event_id: e2, offset_hours: 0, metric: taker_buy_share, value: 0.6, control_hours: 0, control_median: null, control_share_above_zero: null, control_share_below_zero: null, excess: null}
+
+  - name: signal_check_counts_next_hour_pumps_per_rule_and_day
+    description: >
+      Threshold 5 %. AAA on 2025-01-01: 00 has no baseline; 01 (volume 2x, +1 %) is
+      followed by exactly +5 % (a pump); 02 (3x, +5 %: not below the threshold) by +4.99 %;
+      03 has no next hour (04 is missing: 05's +6 % is two hours later and must not count);
+      05 (3x, +6 %: neither flat nor below the threshold) by +10 %;
+      06 has no next hour of its own - BBB's 07 must not be taken for it. BBB on
+      2025-01-02: 00 (3x, +2 %: not flat) is followed by +7 %.
+    model: mart_pump_signal_check
+    overrides:
+      vars:
+        pump_min_return: 0.05
+    given:
+      - input: ref('int_binance__hourly_returns')
+        rows:
+          - {symbol: AAA, open_time_ms: 1735689600000, return_1h: 0, quote_volume: 10, quote_volume_baseline: null}
+          - {symbol: AAA, open_time_ms: 1735693200000, return_1h: 0.01, quote_volume: 2, quote_volume_baseline: 1}
+          - {symbol: AAA, open_time_ms: 1735696800000, return_1h: 0.05, quote_volume: 3, quote_volume_baseline: 1}
+          - {symbol: AAA, open_time_ms: 1735700400000, return_1h: 0.0499, quote_volume: 1.49, quote_volume_baseline: 1}
+          - {symbol: AAA, open_time_ms: 1735707600000, return_1h: 0.06, quote_volume: 3, quote_volume_baseline: 1}
+          - {symbol: AAA, open_time_ms: 1735711200000, return_1h: 0.1, quote_volume: 1.5, quote_volume_baseline: 1}
+          - {symbol: BBB, open_time_ms: 1735714800000, return_1h: 0.2, quote_volume: 1, quote_volume_baseline: null}
+          - {symbol: BBB, open_time_ms: 1735776000000, return_1h: 0.02, quote_volume: 6, quote_volume_baseline: 2}
+          - {symbol: BBB, open_time_ms: 1735779600000, return_1h: 0.07, quote_volume: 2, quote_volume_baseline: 2}
+    expect:
+      rows:
+        - {rule: every_hour, signal_date: 2025-01-01, signal_hours: 3, followed_by_pump: 2}
+        - {rule: volume_1_5x, signal_date: 2025-01-01, signal_hours: 3, followed_by_pump: 2}
+        - {rule: volume_2x, signal_date: 2025-01-01, signal_hours: 3, followed_by_pump: 2}
+        - {rule: volume_2x_flat_price, signal_date: 2025-01-01, signal_hours: 1, followed_by_pump: 1}
+        - {rule: every_hour, signal_date: 2025-01-02, signal_hours: 1, followed_by_pump: 1}
+        - {rule: volume_1_5x, signal_date: 2025-01-02, signal_hours: 1, followed_by_pump: 1}
+        - {rule: volume_2x, signal_date: 2025-01-02, signal_hours: 1, followed_by_pump: 1}
+        - {rule: volume_3x_rising_below_threshold, signal_date: 2025-01-02, signal_hours: 1, followed_by_pump: 1}

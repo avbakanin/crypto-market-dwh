@@ -282,3 +282,40 @@ models:
         data_tests: [not_null]
       - name: excess
         description: value - control_median; NULL when the event has no control value.
+
+  - name: mart_pump_signal_check
+    description: >
+      Does an hour that looks like a pre-pump hour predict a pump in the next hour? One
+      row per (rule, UTC day of hour t): hours where the rule held (with a volume
+      baseline and an hour right after) and how many were followed by an hour rising past
+      pump_min_return. every_hour is the base rate. Precision = followed / hours, lift =
+      precision / base rate, recall = followed / every_hour's followed.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [rule, signal_date]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "signal_hours >= 1 and followed_by_pump between 0 and signal_hours"
+    columns:
+      - name: rule
+        description: >
+          every_hour; volume_1_5x / volume_2x (quote volume over the 7-day baseline);
+          volume_2x_flat_price (and |return_1h| < 2 %); volume_3x_rising_below_threshold
+          (and 0 <= return_1h < pump_min_return).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - every_hour
+                  - volume_1_5x
+                  - volume_2x
+                  - volume_2x_flat_price
+                  - volume_3x_rising_below_threshold
+      - name: signal_date
+        data_tests: [not_null]
+      - name: signal_hours
+        data_tests: [not_null]
+      - name: followed_by_pump
+        data_tests: [not_null]
