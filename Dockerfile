@@ -8,6 +8,7 @@
 #   docker build --target runtime -t crypto-market-dwh:dev .
 #   docker build --target test -t crypto-market-dwh:test . && docker run --rm crypto-market-dwh:test
 #   docker run --rm --entrypoint python crypto-market-dwh:test -m pytest -q tests_airflow
+#   docker build --target dashboard -t crypto-market-dwh-dashboard:dev .
 
 ARG AIRFLOW_IMAGE=apache/airflow:3.4.0-python3.12
 
@@ -39,6 +40,27 @@ COPY --chown=airflow:0 . ${PROJECT_HOME}
 # (see the script); compose puts it in front of every project command.
 COPY --chown=airflow:0 --chmod=0755 docker/with-private-keys.sh /usr/local/bin/with-private-keys
 RUN cd "${PROJECT_HOME}" && "${PROJECT_VENV}/bin/dbt" deps --project-dir dbt
+
+
+# Dashboard: Streamlit + DuckDB over the Parquet exports in data/marts. Its own small
+# image on plain Python: no Airflow, no Snowflake connector, no keys, no project code
+# but dashboard/.
+FROM python:3.12-slim AS dashboard
+
+ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1     MARTS_DIR=/data/marts
+
+COPY requirements-dashboard.txt /tmp/requirements/
+RUN python -m pip install --no-cache-dir --disable-pip-version-check         -r /tmp/requirements/requirements-dashboard.txt     && python -m pip check     && useradd --create-home --uid 1000 dashboard
+
+WORKDIR /app
+COPY dashboard/ /app/dashboard/
+USER dashboard
+EXPOSE 8501
+# python -m puts /app on sys.path, so `from dashboard import data` resolves.
+# No usage statistics, no file watcher (the code is baked in), no browser. An explicit
+# browser.serverAddress also stops the headless start-up from asking checkip.amazonaws.com
+# for the machine's public IP to print an "External URL".
+CMD ["python", "-m", "streamlit", "run", "dashboard/app.py",      "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true",      "--browser.serverAddress=localhost", "--browser.gatherUsageStats=false",      "--server.fileWatcherType=none"]
 
 
 # Linux check of the same code: pytest, ruff and pyright on top of runtime.

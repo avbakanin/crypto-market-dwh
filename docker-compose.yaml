@@ -5,6 +5,7 @@
 #   docker compose up -d                  # Airflow UI on http://localhost:8080
 #   docker compose run --rm project python -m ingestion.check_snowflake
 #   docker compose run --rm project dbt build
+#   docker compose build dashboard          # dashboard on http://localhost:8501
 #
 # Compose reads the repo's .env only to fill in ${...} below; a container gets
 # nothing from it unless the variable is listed under `environment:`. Host
@@ -14,6 +15,9 @@
 # Only the scheduler runs tasks (LocalExecutor), so only the scheduler and the
 # `project` service get the Snowflake variables and keys; the API server, the
 # DAG processor and postgres never see them.
+#
+# The dashboard has an image of its own (no Airflow, no Snowflake connector) and
+# sees only data/marts, read-only: it reads the exports, never Snowflake.
 #
 # Alerts (dags/alerting) are sent from the scheduler (task callbacks) and the
 # DAG processor (run callbacks, callbacks of tasks ended from outside), so
@@ -217,6 +221,37 @@ services:
       - snowflake_loader_key
       - snowflake_dbt_key
       - snowflake_reporter_key
+
+  # Read-only dashboard over the newest mart export (dashboard/). No Snowflake variables,
+  # no keys, no Airflow: only data/marts, mounted read-only; root filesystem read-only.
+  dashboard:
+    build:
+      context: .
+      target: dashboard
+    image: crypto-market-dwh-dashboard:dev
+    environment:
+      MARTS_DIR: /data/marts
+    volumes:
+      - ./data/marts:/data/marts:ro
+    # Loopback only, like the Airflow UI.
+    ports:
+      - "127.0.0.1:8501:8501"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
 volumes:
   airflow-db:
