@@ -175,7 +175,13 @@ def pumps_tab(con: duckdb.DuckDBPyConnection) -> None:
         alt.Chart(table.assign(hour_utc=table["event_hour"].map(utc_text)))
         .mark_circle(size=80, opacity=0.85, stroke="white", strokeWidth=1)
         .encode(
-            x=alt.X("event_hour:T", title="UTC", scale=UTC_SCALE, axis=alt.Axis(format="%b %Y")),
+            x=alt.X(
+                "event_hour:T",
+                title="UTC",
+                scale=UTC_SCALE,
+                # One tick a month: the default weekly ticks repeat "Dec 2025" four times.
+                axis=alt.Axis(format="%b %Y", tickCount="month", labelOverlap=True),
+            ),
             y=alt.Y("return_1h:Q", title="Rise in the hour, %"),
             color=alt.Color(
                 "event_scope:N",
@@ -234,6 +240,11 @@ def pumps_tab(con: duckdb.DuckDBPyConnection) -> None:
             "episode_hours": number("Hours ≥ 5 %"),
             "overlaps_previous_event": st.column_config.CheckboxColumn("Overlaps"),
         },
+    )
+
+    st.caption(
+        "None: the window has no data there. Open interest starts on 2026-10-22, and events "
+        "at the edges of the history lack a full 24 hours before or after."
     )
 
     st.subheader("One event, hour by hour")
