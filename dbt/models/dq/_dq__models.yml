@@ -41,3 +41,19 @@ models:
       - name: is_latest
         description: True on the last result of each check.
         data_tests: [not_null]
+
+  - name: dq_data_coverage
+    description: >
+      How far each extract dataset reaches: rows, symbols, first and last point (moments;
+      candles end at open + 1 h) and the newest batch. One row per dataset, also for an
+      empty one. The dashboard shows klines_1h's data_to as "data as of".
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "row_count > 0 and symbol_count > 0 and data_from <= data_to"
+    columns:
+      - name: dataset
+        description: Landing-zone name of the dataset (data/raw/<dataset>).
+        data_tests: [unique, not_null]
+      - name: data_to
+        description: Last point of the series; for candles the close of the last hour.

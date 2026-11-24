@@ -71,6 +71,8 @@ EXPORTS = (
         "CRYPTO_DWH.DQ.DQ_CHECK_RESULTS",
         "run_started_at, invocation_id, check_unique_id",
     ),
+    # How far each dataset reaches: the dashboard's "data as of".
+    MartExport("dq_data_coverage", "CRYPTO_DWH.DQ.DQ_DATA_COVERAGE", "dataset"),
 )
 
 # Type codes of snowflake.connector.constants.FIELD_ID_TO_NAME

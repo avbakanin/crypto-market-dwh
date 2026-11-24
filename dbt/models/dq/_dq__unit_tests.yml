@@ -44,3 +44,35 @@ unit_tests:
            model_name: int_binance__hourly_returns, severity: warn, failures: 25, is_latest: true}
         - {invocation_id: b, check_unique_id: test.p.unique, check_type: generic,
            model_name: dim_symbol, severity: error, failures: 0, is_latest: true}
+
+  - name: dq_data_coverage_reaches_per_dataset
+    description: >
+      Candles end an hour after the last open time; long/short rows split by series;
+      a series without rows (top_position) still gets its row, with 0 rows.
+    model: dq_data_coverage
+    given:
+      - input: ref('stg_binance__klines_1h')
+        rows:
+          - {symbol: AAAUSDT, open_time: "2026-11-24 06:00:00 +00:00", _batch_id: 20261124T070712Z}
+          - {symbol: AAAUSDT, open_time: "2026-11-24 07:00:00 +00:00", _batch_id: 20261124T080711Z}
+          - {symbol: BBBUSDT, open_time: "2026-11-24 05:00:00 +00:00", _batch_id: 20261124T070712Z}
+      - input: ref('stg_binance__funding_rate')
+        rows:
+          - {contract_symbol: AAAUSDT, funding_hour: "2026-11-24 00:00:00 +00:00", _batch_id: 20261124T010700Z}
+          - {contract_symbol: AAAUSDT, funding_hour: "2026-11-24 08:00:00 +00:00", _batch_id: 20261124T080711Z}
+      - input: ref('stg_binance__open_interest_1h')
+        rows:
+          - {contract_symbol: AAAUSDT, snapshot_time: "2026-11-24 08:00:00 +00:00", _batch_id: 20261124T080711Z}
+      - input: ref('stg_binance__long_short_ratio_1h')
+        rows:
+          - {contract_symbol: AAAUSDT, ratio_series: top_account, snapshot_time: "2026-11-24 07:00:00 +00:00", _batch_id: 20261124T070712Z}
+          - {contract_symbol: AAAUSDT, ratio_series: top_account, snapshot_time: "2026-11-24 08:00:00 +00:00", _batch_id: 20261124T080711Z}
+          - {contract_symbol: BBBUSDT, ratio_series: global_account, snapshot_time: "2026-11-24 06:00:00 +00:00", _batch_id: 20261124T070712Z}
+    expect:
+      rows:
+        - {dataset: klines_1h, row_count: 3, symbol_count: 2, data_from: "2026-11-24 05:00:00 +00:00", data_to: "2026-11-24 08:00:00 +00:00", latest_batch_id: 20261124T080711Z}
+        - {dataset: funding_rate, row_count: 2, symbol_count: 1, data_from: "2026-11-24 00:00:00 +00:00", data_to: "2026-11-24 08:00:00 +00:00", latest_batch_id: 20261124T080711Z}
+        - {dataset: open_interest_1h, row_count: 1, symbol_count: 1, data_from: "2026-11-24 08:00:00 +00:00", data_to: "2026-11-24 08:00:00 +00:00", latest_batch_id: 20261124T080711Z}
+        - {dataset: top_account_ratio_1h, row_count: 2, symbol_count: 1, data_from: "2026-11-24 07:00:00 +00:00", data_to: "2026-11-24 08:00:00 +00:00", latest_batch_id: 20261124T080711Z}
+        - {dataset: top_position_ratio_1h, row_count: 0, symbol_count: 0, data_from: null, data_to: null, latest_batch_id: null}
+        - {dataset: global_account_ratio_1h, row_count: 1, symbol_count: 1, data_from: "2026-11-24 06:00:00 +00:00", data_to: "2026-11-24 06:00:00 +00:00", latest_batch_id: 20261124T070712Z}

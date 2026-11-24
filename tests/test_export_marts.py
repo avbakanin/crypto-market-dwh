@@ -131,6 +131,7 @@ def test_exported_files_are_the_ones_the_dashboard_reads() -> None:
         "fct_pump_event_window",
         "mart_pump_profile",
         "dq_check_results",
+        "dq_data_coverage",
     ]
     assert {export.relation.split(".")[1] for export in EXPORTS} == {"MARTS", "DQ"}
 
