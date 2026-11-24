@@ -123,3 +123,71 @@ def test_connect_passes_params_and_sets_keep_alive_detection_explicitly(
         **connection_params(env),
         "enable_server_session_keep_alive_auto_detection": False,
     }
+
+
+# --- reporter: fixed identity, account and key from the environment ---------------------
+
+
+@pytest.fixture
+def reporter_env(env: dict[str, str], key_file: Path) -> dict[str, str]:
+    """The loader's variables are present too, as in .env and in the scheduler."""
+    return {
+        **env,
+        snowflake_conn.REPORTER_KEY_PATH_VAR: str(key_file),
+        snowflake_conn.REPORTER_PASSPHRASE_VAR: SECRET,
+    }
+
+
+def test_reporter_identity_is_fixed_whatever_the_loader_variables_say(
+    reporter_env: dict[str, str], key_file: Path
+) -> None:
+    assert snowflake_conn.reporter_connection_params(reporter_env) == {
+        "account": "ORG-ACCOUNT",
+        "user": "CRYPTO_REPORTER",
+        "role": "CRYPTO_REPORTER",
+        "warehouse": "CRYPTO_WH",
+        "database": "CRYPTO_DWH",
+        "schema": "MARTS",
+        "authenticator": "SNOWFLAKE_JWT",
+        "private_key_file": str(key_file),
+        "private_key_password": SECRET,
+        "arrow_number_to_decimal": True,
+    }
+
+
+def test_reporter_never_uses_the_loader_key(reporter_env: dict[str, str], tmp_path: Path) -> None:
+    reporter_env["SNOWFLAKE_PRIVATE_KEY_PATH"] = str(tmp_path / "loader_key.p8")
+    reporter_env[PASSPHRASE_VAR] = "loader-passphrase"
+    params = snowflake_conn.reporter_connection_params(reporter_env)
+    assert params["private_key_file"] == reporter_env[snowflake_conn.REPORTER_KEY_PATH_VAR]
+    assert params["private_key_password"] == SECRET
+
+
+@pytest.mark.parametrize("name", snowflake_conn.REPORTER_REQUIRED_VARS)
+def test_reporter_missing_var_is_named(reporter_env: dict[str, str], name: str) -> None:
+    reporter_env[name] = ""
+    with pytest.raises(SnowflakeConfigError, match=name):
+        snowflake_conn.reporter_connection_params(reporter_env)
+
+
+def test_reporter_missing_key_file_fails_before_connecting(
+    reporter_env: dict[str, str], tmp_path: Path
+) -> None:
+    reporter_env[snowflake_conn.REPORTER_KEY_PATH_VAR] = str(tmp_path / "no_such_key.p8")
+    with pytest.raises(SnowflakeConfigError, match="Private key file not found"):
+        snowflake_conn.reporter_connection_params(reporter_env)
+
+
+def test_connect_builds_the_reporter_params_when_asked(
+    reporter_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_connect(**kwargs: object) -> str:
+        captured.update(kwargs)
+        return "connection"
+
+    monkeypatch.setattr(snowflake_conn.snowflake.connector, "connect", fake_connect)
+    snowflake_conn.connect(reporter_env, params=snowflake_conn.reporter_connection_params)
+    assert captured["user"] == "CRYPTO_REPORTER"
+    assert captured["enable_server_session_keep_alive_auto_detection"] is False
