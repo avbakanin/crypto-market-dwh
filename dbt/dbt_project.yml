@@ -68,6 +68,9 @@ vars:
   return_zscore_min_hours: 168
   # Volume baseline: 7 days.
   volume_baseline_hours: 168
+  # Ordinary hours per pump event and pool in fct_pump_control_window (the profile's
+  # comparison): 30 x ~200 events is enough for stable control medians per offset.
+  control_hours_per_event: 30
 
 seeds:
   crypto_market_dwh:

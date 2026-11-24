@@ -107,3 +107,51 @@ models:
         description: >
           Top traders' long/short position ratio relative to the start; also for the top
           account and global account ratios. History ~30 days: NULL before.
+
+  - name: fct_pump_control_window
+    description: >
+      Ordinary hours of the same symbol per pump event, measured exactly like
+      fct_pump_event_window (macro pump_window): the comparison for the profile. No hour
+      of the symbol past the pump threshold within 2 * pump_window_hours rows; two pools
+      of control_hours_per_event each, picked by a hash of (event, hour): year (any
+      candidate) and recent (open interest and long/short in every hour of the window).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [pump_event_id, control_open_time_ms, offset_hours]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "is_year_control or is_recent_control"
+      # An ordinary hour's window has no qualifying hour, or it would be a pump window.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "coalesce(return_1h, 0) < {{ var('pump_min_return') }}"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "offset_hours <> -1 or return_since_start = 0"
+      # The recent pool exists for the futures metrics: they must be there.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              not is_recent_control
+              or (open_interest_change_since_start is not null
+              and top_position_ratio_change_since_start is not null)
+    columns:
+      - name: pump_event_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_pump_events')
+                field: pump_event_id
+      - name: control_open_time_ms
+        description: Open time of the control hour (offset 0 of its window).
+        data_tests: [not_null]
+      - name: is_year_control
+        description: In the year pool (price, volume, taker share, funding).
+        data_tests: [not_null]
+      - name: is_recent_control
+        description: In the recent pool (open interest, long/short ratios).
+        data_tests: [not_null]
+      - name: offset_hours
+        data_tests: [not_null]

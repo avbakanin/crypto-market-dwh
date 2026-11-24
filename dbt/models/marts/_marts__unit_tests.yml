@@ -71,3 +71,58 @@ unit_tests:
            volume_ratio_event: null, volume_ratio_before: null, volume_ratio_after: null,
            open_interest_change_event: null,
            funding_rate_8h_before: null, funding_rate_8h_max_after: null}
+
+  - name: control_hours_are_ordinary_hours_of_the_event_symbol
+    description: >
+      Window shrunk to 1 hour, so a candidate needs rows -2 and +1 and no qualifying hour
+      within 2 rows. AAA hours 00-11 (offsets: hours after 2025-01-01 00:00 UTC): 06
+      rises 6 % (rules out 04-08), 03 has no volume baseline, 00, 01 and 11 lack a full
+      window -> controls 02, 09, 10. Open interest and long/short exist from 05, so only
+      09 and 10 have a full futures window (recent pool). BBB (00-08) rises at 02, which
+      must not rule out AAA's 02, and has candidates of its own (05-07), which must not
+      become AAA's controls. Changes since the
+      start are against the end of hour -1 (AAA 10 closes at 125).
+    model: fct_pump_control_window
+    overrides:
+      vars:
+        pump_min_return: 0.05
+        pump_window_hours: 1
+        control_hours_per_event: 10
+    given:
+      - input: ref('fct_pump_events')
+        rows:
+          - {pump_event_id: e1, symbol: AAA}
+      - input: ref('int_binance__hourly_market')
+        rows:
+          - {symbol: AAA, open_time_ms: 1735689600000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: AAA, open_time_ms: 1735693200000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: AAA, open_time_ms: 1735696800000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: AAA, open_time_ms: 1735700400000, return_1h: 0, close_price: 100, quote_volume_baseline: null}
+          - {symbol: AAA, open_time_ms: 1735704000000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: AAA, open_time_ms: 1735707600000, return_1h: 0, close_price: 100, quote_volume_baseline: 1, open_interest_coins: 1000, top_position_long_short_ratio: 2}
+          - {symbol: AAA, open_time_ms: 1735711200000, return_1h: 0.06, close_price: 100, quote_volume_baseline: 1, open_interest_coins: 1000, top_position_long_short_ratio: 2}
+          - {symbol: AAA, open_time_ms: 1735714800000, return_1h: 0, close_price: 100, quote_volume_baseline: 1, open_interest_coins: 1000, top_position_long_short_ratio: 2}
+          - {symbol: AAA, open_time_ms: 1735718400000, return_1h: 0, close_price: 100, quote_volume_baseline: 1, open_interest_coins: 1000, top_position_long_short_ratio: 2}
+          - {symbol: AAA, open_time_ms: 1735722000000, return_1h: 0, close_price: 100, quote_volume_baseline: 1, open_interest_coins: 1000, top_position_long_short_ratio: 2}
+          - {symbol: AAA, open_time_ms: 1735725600000, return_1h: 0, close_price: 125, quote_volume_baseline: 1, open_interest_coins: 1000, top_position_long_short_ratio: 2}
+          - {symbol: AAA, open_time_ms: 1735729200000, return_1h: 0, close_price: 100, quote_volume_baseline: 1, open_interest_coins: 1000, top_position_long_short_ratio: 2}
+          - {symbol: BBB, open_time_ms: 1735689600000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: BBB, open_time_ms: 1735693200000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: BBB, open_time_ms: 1735696800000, return_1h: 0.07, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: BBB, open_time_ms: 1735700400000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: BBB, open_time_ms: 1735704000000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: BBB, open_time_ms: 1735707600000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: BBB, open_time_ms: 1735711200000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: BBB, open_time_ms: 1735714800000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+          - {symbol: BBB, open_time_ms: 1735718400000, return_1h: 0, close_price: 100, quote_volume_baseline: 1}
+    expect:
+      rows:
+        - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735696800000, offset_hours: -1, is_year_control: true, is_recent_control: false, return_since_start: 0, open_interest_change_since_start: null}
+        - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735696800000, offset_hours: 0, is_year_control: true, is_recent_control: false, return_since_start: 0, open_interest_change_since_start: null}
+        - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735696800000, offset_hours: 1, is_year_control: true, is_recent_control: false, return_since_start: 0, open_interest_change_since_start: null}
+        - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735722000000, offset_hours: -1, is_year_control: true, is_recent_control: true, return_since_start: 0, open_interest_change_since_start: 0}
+        - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735722000000, offset_hours: 0, is_year_control: true, is_recent_control: true, return_since_start: 0, open_interest_change_since_start: 0}
+        - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735722000000, offset_hours: 1, is_year_control: true, is_recent_control: true, return_since_start: 0.25, open_interest_change_since_start: 0}
+        - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735725600000, offset_hours: -1, is_year_control: true, is_recent_control: true, return_since_start: 0, open_interest_change_since_start: 0}
+        - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735725600000, offset_hours: 0, is_year_control: true, is_recent_control: true, return_since_start: 0.25, open_interest_change_since_start: 0}
+        - {pump_event_id: e1, symbol: AAA, control_open_time_ms: 1735725600000, offset_hours: 1, is_year_control: true, is_recent_control: true, return_since_start: 0, open_interest_change_since_start: 0}
