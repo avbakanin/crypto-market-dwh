@@ -100,6 +100,10 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "offset_hours <> -1 or return_since_start = 0"
+      # The anchor hour's own close is the base of the "after" return.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "offset_hours <> 0 or return_since_anchor_close = 0"
     columns:
       - name: pump_event_id
         data_tests:
@@ -110,6 +114,10 @@ models:
                 field: pump_event_id
       - name: offset_hours
         data_tests: [not_null]
+      - name: return_since_anchor_close
+        description: >
+          Close against the close of the event hour (offset 0): what an entry at the end of
+          the pump hour would have seen.
       - name: taker_buy_share
         description: Taker buy share of the hour's quote volume (about 0.5 normally).
       - name: top_position_ratio_change_since_start
@@ -184,6 +192,11 @@ models:
             expression: >
               metric <> 'return_since_start' or offset_hours <> -1
               or (event_median = 0 and control_median = 0 and median_excess = 0)
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              metric <> 'return_since_anchor_close' or offset_hours <> 0
+              or (event_median = 0 and control_median = 0 and median_excess = 0)
     columns:
       - name: event_scope
         data_tests:
@@ -200,6 +213,7 @@ models:
               arguments:
                 values:
                   - return_since_start
+                  - return_since_anchor_close
                   - volume_ratio
                   - taker_buy_share
                   - funding_premium_8h
@@ -253,6 +267,7 @@ models:
               arguments:
                 values:
                   - return_since_start
+                  - return_since_anchor_close
                   - volume_ratio
                   - taker_buy_share
                   - funding_premium_8h

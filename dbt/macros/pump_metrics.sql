@@ -7,6 +7,7 @@
 {% macro pump_metrics() %}
 {{ return([
     ('return_since_start', 'year'),
+    ('return_since_anchor_close', 'year'),
     ('volume_ratio', 'year'),
     ('taker_buy_share', 'year'),
     ('funding_premium_8h', 'year'),

@@ -433,6 +433,11 @@ METRICS: dict[str, Metric] = {
     "return_since_start": Metric(
         "Price vs start", "%", "Close against the close of hour -1, the start of the event."
     ),
+    "return_since_anchor_close": Metric(
+        "Price after the pump hour",
+        "%",
+        "Close against the close of hour 0: what buying at the end of the pump hour saw.",
+    ),
     "volume_ratio": Metric(
         "Volume vs 7-day baseline", "x", "Quote volume of the hour over the 7 days before."
     ),

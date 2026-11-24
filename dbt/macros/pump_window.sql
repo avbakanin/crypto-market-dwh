@@ -17,6 +17,8 @@ select
     market.open_time,
     market.return_1h,
     market.close_price / start_hour.close_price - 1 as return_since_start,
+    -- After the anchor hour closed: what an entry at its close would have seen.
+    market.close_price / anchor_hour.close_price - 1 as return_since_anchor_close,
     -- Against the 7-day mean before the anchor hour (a mean: the median hour is ~0.7).
     market.quote_volume / anchor_hour.quote_volume_baseline as volume_ratio,
     market.taker_buy_share,
