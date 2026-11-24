@@ -17,10 +17,12 @@
 --   CRYPTO_WH_DAILY_MONITOR daily credit cap for the project warehouse
 --   CRYPTO_DWH_ROLE         ingestion role: writes RAW only, owns the RAW objects
 --   CRYPTO_TRANSFORMER      dbt role: reads RAW, owns the objects in STAGING, MARTS, DQ
+--   CRYPTO_REPORTER         read-only role: reads MARTS and DQ (dashboard export)
 --   CRYPTO_WH               X-Small warehouse, suspends after 60 s idle
 --   CRYPTO_DWH              database with schemas RAW, STAGING, MARTS, DQ
 --   CRYPTO_LOADER           service user for ingestion, CRYPTO_DWH_ROLE only
 --   CRYPTO_DBT              service user for dbt, CRYPTO_TRANSFORMER only
+--   CRYPTO_REPORTER         service user for the export, CRYPTO_REPORTER role only
 -- =============================================================================
 
 -- The user running this script gets both project roles (see section 2).
@@ -251,3 +253,61 @@ ALTER USER CRYPTO_DBT SET
     COMMENT = 'crypto-market-dwh: dbt (key-pair auth)';
 
 GRANT ROLE CRYPTO_TRANSFORMER TO USER CRYPTO_DBT;
+
+
+-- -----------------------------------------------------------------------------
+-- 8. Read-only role and service user for the dashboard export
+-- -----------------------------------------------------------------------------
+-- The export (ingestion/export_marts.py) copies the marts and the DQ results to
+-- local Parquet files, which the dashboard reads. It needs SELECT on MARTS and
+-- DQ and nothing else: no RAW, no STAGING, no CREATE, no OPERATE.
+-- The role and the user share a name, as they share a single purpose.
+USE ROLE USERADMIN;
+
+CREATE ROLE IF NOT EXISTS CRYPTO_REPORTER;
+ALTER ROLE CRYPTO_REPORTER SET
+    COMMENT = 'crypto-market-dwh: reads MARTS and DQ (dashboard export)';
+
+GRANT ROLE CRYPTO_REPORTER TO ROLE SYSADMIN;
+GRANT ROLE CRYPTO_REPORTER TO USER IDENTIFIER($setup_user);
+
+-- Same pattern as the other service users: key pair only, one role, no
+-- secondary roles, UTC session. The public key is registered separately:
+--   ALTER USER CRYPTO_REPORTER ADD KEY PAIR <key_name> PUBLIC_KEY = '<base64>';
+CREATE USER IF NOT EXISTS CRYPTO_REPORTER
+    TYPE = SERVICE
+    COMMENT = 'crypto-market-dwh: dashboard export, read-only (key-pair auth)';
+
+ALTER USER CRYPTO_REPORTER SET
+    DEFAULT_ROLE = CRYPTO_REPORTER
+    DEFAULT_WAREHOUSE = CRYPTO_WH
+    DEFAULT_NAMESPACE = CRYPTO_DWH.MARTS
+    DEFAULT_SECONDARY_ROLES = ()
+    TIMEZONE = 'UTC'
+    COMMENT = 'crypto-market-dwh: dashboard export, read-only (key-pair auth)';
+
+GRANT ROLE CRYPTO_REPORTER TO USER CRYPTO_REPORTER;
+
+-- The export runs right after dbt, on the same warehouse: it usually finds it
+-- awake, and its queries count against the same daily monitor.
+USE ROLE SYSADMIN;
+
+GRANT USAGE ON WAREHOUSE CRYPTO_WH TO ROLE CRYPTO_REPORTER;
+GRANT USAGE ON DATABASE CRYPTO_DWH TO ROLE CRYPTO_REPORTER;
+GRANT USAGE ON SCHEMA CRYPTO_DWH.MARTS TO ROLE CRYPTO_REPORTER;
+GRANT USAGE ON SCHEMA CRYPTO_DWH.DQ TO ROLE CRYPTO_REPORTER;
+
+-- dbt replaces every table and view on each build (CREATE OR REPLACE), which
+-- drops grants on the old object: FUTURE grants apply to each new one. ALL
+-- covers the objects that exist now. In DQ the stop-test views read STAGING
+-- with their owner's rights, so the reporter sees failing rows, not STAGING.
+USE ROLE SECURITYADMIN;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA CRYPTO_DWH.MARTS TO ROLE CRYPTO_REPORTER;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA CRYPTO_DWH.MARTS TO ROLE CRYPTO_REPORTER;
+GRANT SELECT ON ALL VIEWS IN SCHEMA CRYPTO_DWH.MARTS TO ROLE CRYPTO_REPORTER;
+GRANT SELECT ON FUTURE VIEWS IN SCHEMA CRYPTO_DWH.MARTS TO ROLE CRYPTO_REPORTER;
+GRANT SELECT ON ALL TABLES IN SCHEMA CRYPTO_DWH.DQ TO ROLE CRYPTO_REPORTER;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA CRYPTO_DWH.DQ TO ROLE CRYPTO_REPORTER;
+GRANT SELECT ON ALL VIEWS IN SCHEMA CRYPTO_DWH.DQ TO ROLE CRYPTO_REPORTER;
+GRANT SELECT ON FUTURE VIEWS IN SCHEMA CRYPTO_DWH.DQ TO ROLE CRYPTO_REPORTER;
