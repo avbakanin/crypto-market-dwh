@@ -16,34 +16,34 @@ the data, the loads and itself.
 
 ```mermaid
 flowchart LR
-    subgraph binance[Binance]
-        spot[Spot API<br/>hourly candles]
-        fut[USD-M Futures API<br/>funding, open interest,<br/>long/short ratios]
+    api["Binance APIs<br/>spot candles<br/>futures funding,<br/>open interest,<br/>long/short"]
+    subgraph dag["Airflow DAG, every 3 h"]
+        direction TB
+        ext["extract x4<br/>from high-water marks"] --> lz[("landing zone<br/>immutable batches")]
+        lz --> load["load_raw<br/>PUT + COPY, reconcile"]
+        load --> fresh["source freshness"]
+        fresh --> build["dbt build<br/>models + tests"]
+        build --> rec["DQ log reconciliation"]
+        rec --> exp["export_marts"]
     end
-    subgraph host[Docker Compose on one machine]
-        subgraph airflow[Airflow 3.4 DAG, every 3 h]
-            ext[extract x4] --> lz[(landing zone<br/>immutable JSON batches)]
-            lz --> load[load_raw<br/>PUT + COPY, reconcile]
-            fresh[source freshness] --> build[dbt build<br/>models + tests]
-            build --> rec[DQ log<br/>reconciliation]
-            rec --> exp[export_marts]
-        end
-        exp --> pq[(Parquet<br/>data/marts)]
-        pq --> dash[Streamlit dashboard<br/>DuckDB in memory]
+    subgraph sf["Snowflake"]
+        direction TB
+        raw[("RAW<br/>append-only")] --> stg[("STAGING")] --> marts[("MARTS")]
+        dq[("DQ<br/>findings + log")]
     end
-    subgraph sf[Snowflake]
-        raw[(RAW<br/>append-only)] --> stg[(STAGING)] --> marts[(MARTS)]
-        dq[(DQ<br/>findings + log)]
+    subgraph out["Dashboard"]
+        direction TB
+        pq[("Parquet export<br/>data/marts")] --> dash["Streamlit<br/>DuckDB in memory"]
     end
-    spot --> ext
-    fut --> ext
-    load --> raw
-    load --> fresh
-    build -.-> stg
-    build -.-> dq
-    marts --> exp
-    airflow -.->|failures, warn digest| tg[Telegram]
-    airflow -.->|heartbeat| hc[healthchecks.io]
+    subgraph alerts["Alerts"]
+        direction TB
+        tg["Telegram<br/>failures, warn digest"]
+        hc["healthchecks.io<br/>heartbeat"]
+    end
+    api --> dag
+    dag <-->|"load RAW,<br/>dbt build + tests"| sf
+    sf -->|"export_marts<br/>as read-only reporter"| out
+    dag -.-> alerts
 ```
 
 - **Extract** works from high-water marks kept in the landing zone, not from the warehouse:

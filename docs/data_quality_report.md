@@ -23,16 +23,22 @@ of rows.
 
 ```mermaid
 flowchart LR
-    API[Binance API] --> X[extract]
-    X -->|manifest: rows, duplicates, gaps, expected, lost| LZ[(landing zone)]
-    LZ --> L[load_raw]
-    L -->|reconcile with manifest| RAW[(RAW)]
-    RAW --> F[source freshness]
-    F --> S[staging<br/>stop + warn tests]
-    S --> I[intermediate<br/>stop + warn tests]
-    I --> M[marts<br/>stop tests]
-    M --> R[DQ log reconciliation]
-    R --> E[export for the dashboard]
+    subgraph ing["Ingestion (Python)"]
+        direction TB
+        API[Binance API] --> X[extract]
+        X -->|"manifest: rows, duplicates,<br/>gaps, expected, lost"| LZ[(landing zone)]
+        LZ --> L[load_raw]
+        L -->|reconcile with manifest| RAW[(RAW)]
+    end
+    subgraph dbt["dbt, then export"]
+        direction TB
+        F[source freshness] --> S[staging<br/>stop + warn tests]
+        S --> I[intermediate<br/>stop + warn tests]
+        I --> M[marts<br/>stop tests]
+        M --> R[DQ log reconciliation]
+        R --> E[export for the dashboard]
+    end
+    ing --> dbt
 ```
 
 | Layer | Check | Reaction |
