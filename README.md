@@ -11,6 +11,8 @@ the data, the loads and itself.
   tests, 13 unit tests, what they found in real APIs.
 - **Source notes:** [docs/source_notes.md](docs/source_notes.md): 102 observations about
   the Binance APIs, Snowflake, dbt, Airflow and Docker, each with evidence.
+- **Baseline:** [docs/snowflake_baseline.md](docs/snowflake_baseline.md): 758 metrics
+  fingerprinting every layer, used to check the planned DuckDB copy.
 
 ## Architecture
 
@@ -188,9 +190,9 @@ with Airflow's own interpreter.
 | [dbt/](dbt/) | models (staging, intermediate, marts, DQ), tests, macros, DQ log hooks |
 | [dags/](dags/) | the pipeline DAG and the alerting package |
 | [dashboard/](dashboard/) | Streamlit app and its data layer |
-| [analysis/](analysis/) | the findings report computed from the export |
+| [analysis/](analysis/) | the findings report computed from the export; the landing zone check of the baseline |
 | [tests/](tests/), [tests_airflow/](tests_airflow/) | Python tests; DAG and alert tests |
-| [docs/](docs/) | findings, data quality report, source notes |
+| [docs/](docs/) | findings, data quality report, source notes, Snowflake baseline |
 
 ## Cost
 
