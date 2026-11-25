@@ -51,6 +51,7 @@ def test_filters_change_the_events(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert not app.exception
     assert app.metric[0].value == "2"
     assert app.metric[1].value == "1"  # one market move, one day
+    assert set(app.dataframe[0].value["scope_label"]) == {"Market move (2+ coins)"}
 
 
 def test_every_profile_metric_renders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

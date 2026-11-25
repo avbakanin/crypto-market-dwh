@@ -190,10 +190,13 @@ def pumps_tab(con: duckdb.DuckDBPyConnection) -> None:
             ),
             y=alt.Y("return_1h:Q", title="Rise in the hour, %"),
             color=alt.Color(
-                "event_scope:N",
+                "scope_label:N",
                 title="Scope",
-                scale=alt.Scale(domain=list(SCOPE_COLORS), range=list(SCOPE_COLORS.values())),
-                legend=alt.Legend(orient="top", labelExpr="replace(datum.label, '_', ' ')"),
+                scale=alt.Scale(
+                    domain=[data.SCOPES[s] for s in SCOPE_COLORS],
+                    range=list(SCOPE_COLORS.values()),
+                ),
+                legend=alt.Legend(orient="top"),
             ),
             tooltip=[
                 alt.Tooltip("hour_utc:N", title="Hour"),
@@ -213,7 +216,7 @@ def pumps_tab(con: duckdb.DuckDBPyConnection) -> None:
         column_order=[
             "event_hour",
             "symbol",
-            "event_scope",
+            "scope_label",
             "market_breadth",
             "return_1h",
             "return_4h",
@@ -231,7 +234,7 @@ def pumps_tab(con: duckdb.DuckDBPyConnection) -> None:
         column_config={
             "event_hour": moment("Hour (UTC)"),
             "symbol": "Coin",
-            "event_scope": "Scope",
+            "scope_label": "Scope",
             "market_breadth": number("Coins that hour"),
             "return_1h": number("Rise 1 h, %", "%.1f"),
             "return_4h": number("Rise 4 h, %", "%.1f"),

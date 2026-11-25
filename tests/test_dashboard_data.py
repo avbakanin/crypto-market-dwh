@@ -354,6 +354,8 @@ def test_events_table_shows_percent_and_basis_points(con: duckdb.DuckDBPyConnect
     assert table.loc["e1", "return_after"] == pytest.approx(1.0)
     assert table.loc["e1", "funding_rate_8h_before"] == pytest.approx(-1.0)
     assert table.loc["e1", "market_breadth"] == 1  # counts stay counts
+    # The scope reads as in the filter, not as the raw value.
+    assert set(table["scope_label"]) == {"Single coin", "Market move (2+ coins)"}
     assert events.loc[events["pump_event_id"] == "e2", "return_1h"].item() == pytest.approx(0.12)
 
 

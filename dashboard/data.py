@@ -402,8 +402,10 @@ BASIS_POINT_COLUMNS = ("funding_rate_8h_before",)
 
 
 def events_table(events: pd.DataFrame) -> pd.DataFrame:
-    """pump_events for display: fractions in percent, funding in basis points."""
+    """pump_events for display: fractions in percent, funding in basis points, and the
+    scope under the label the filter uses."""
     table = events.copy()
+    table["scope_label"] = table["event_scope"].map(SCOPES.__getitem__)
     table[list(PERCENT_COLUMNS)] = table[list(PERCENT_COLUMNS)] * 100
     table[list(BASIS_POINT_COLUMNS)] = table[list(BASIS_POINT_COLUMNS)] * 10_000
     return table
