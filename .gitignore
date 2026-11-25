@@ -230,6 +230,8 @@ dbt/dbt_packages/
 dbt/logs/
 
 CLAUDE.md
+# personal study notes (interview preparation), not part of the project
+notes/
 
 # private keys (kept outside the repo; this is a safety net)
 *.p8
