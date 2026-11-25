@@ -153,8 +153,10 @@ services:
     environment:
       <<: [*airflow-env, *project-env, *alert-env]
       PROJECT_KEYS_DIR: /run/project-keys
+    # Explicit mode: on a container restart (Docker or Windows reboot) Docker
+    # remounts a tmpfs without one as 755 root, and with-private-keys fails.
     tmpfs:
-      - /run/project-keys
+      - /run/project-keys:mode=1777
     volumes:
       - airflow-logs:/opt/airflow/logs
       # Development: the repo's DAGs over the baked-in copy, read-only.
@@ -208,9 +210,10 @@ services:
       # The project venv first; Airflow's own venv is not on the path.
       PATH: /opt/project-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       PROJECT_KEYS_DIR: /run/project-keys
-    # In-memory directory for the owner-only key copies (with-private-keys).
+    # In-memory directory for the owner-only key copies (with-private-keys);
+    # explicit mode for the same reason as the scheduler's.
     tmpfs:
-      - /run/project-keys
+      - /run/project-keys:mode=1777
     volumes:
       # The landing zone is the extract's high-water mark: one copy, shared
       # with the host, never a separate volume.
