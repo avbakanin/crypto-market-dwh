@@ -113,6 +113,12 @@ from 24 hours before the pump to 24 hours after.
 
 ![One pump episode hour by hour](docs/images/dashboard_event.png)
 
+**Dashboard, profile ±24 h:** the median pump against the median ordinary hour of the same
+coins, here price against the start; the band is the middle half of the pumps. Other
+metrics: volume, taker buy share, funding, open interest, long/short.
+
+![Profile tab: median price around 198 pumps against ordinary hours](docs/images/dashboard_profile.png)
+
 **Dashboard, data quality:** the newest dbt build, and how far each dataset reaches.
 
 ![Data quality tab: checks of the newest build and coverage per dataset](docs/images/dashboard_quality.png)
