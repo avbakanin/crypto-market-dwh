@@ -101,6 +101,32 @@ Full report: [docs/data_quality_report.md](docs/data_quality_report.md).
 - **Shown live:** a resent candle with `high` and `low` swapped stopped the DAG at the stop
   test and sent one Telegram message pointing at the offending row.
 
+## Screenshots
+
+**Dashboard, pumps.** 198 episodes over a year, split into single-coin pumps and market
+moves; filters by scope, coin, date and threshold.
+
+![Pumps tab: counters and the timeline of episodes](docs/images/dashboard_pumps.png)
+
+**One event, hour by hour:** price against the start and volume against its weekly mean,
+from 24 hours before the pump to 24 hours after.
+
+![One pump episode hour by hour](docs/images/dashboard_event.png)
+
+**Dashboard, data quality:** the newest dbt build, and how far each dataset reaches.
+
+![Data quality tab: checks of the newest build and coverage per dataset](docs/images/dashboard_quality.png)
+
+**Airflow:** the last ten runs, every task green; a pink square is an extract with nothing
+new (exit code 99 → skipped: funding settles every 4 or 8 hours).
+
+![Airflow grid of the crypto_pipeline DAG](docs/images/airflow_dag.png)
+
+**Telegram alert** from the week 4 demonstration: the failed stop test, the row count and
+the query that shows the offending row, plus the warnings that ran before the stop.
+
+<img src="docs/images/telegram_alert.png" alt="Telegram alert for a failed dbt build" width="420">
+
 ## Run it
 
 **Prerequisites.** Docker Desktop and a Snowflake account (a trial works).
