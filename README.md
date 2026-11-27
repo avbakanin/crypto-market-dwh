@@ -1,5 +1,7 @@
 # crypto-market-dwh
 
+> **Status: archived** — the Snowflake trial ended; the pipeline continues in the DuckDB port: [crypto-market-dwh-duckdb](https://github.com/avbakanin/crypto-market-dwh-duckdb) (switched over 2026-11-27).
+
 **What happens to volume, open interest and funding in the 24 hours around a sharp hourly
 rise of a coin?** An end-to-end pipeline answers it on a year of Binance data: Binance API →
 Snowflake → dbt → Streamlit, orchestrated by Airflow, with a data quality layer that checks
